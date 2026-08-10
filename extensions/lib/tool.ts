@@ -72,7 +72,7 @@ export function buildCanonTool(ready: (ctx: unknown) => CanonRuntime) {
 }
 
 function run(runtime: CanonRuntime, params: Record<string, unknown>): string {
-  const { surfacer, cwd } = runtime;
+  const { surfacer } = runtime;
   const action = String(params.action ?? "");
   const { mount, path } = typeof params.path === "string" ? route(runtime, params.path) : { mount: runtime.mounts[0], path: "" };
   const store = mount.store;
@@ -91,7 +91,9 @@ function run(runtime: CanonRuntime, params: Record<string, unknown>): string {
         article.capsule ? `capsule: ${article.capsule}` : "",
         article.updated ? `updated: ${article.updated}` : "",
       ].filter(Boolean).join("\n");
-      return `${title}\n${head}\n\n${article.body}`.trim();
+      const mentions = runtime.mounts[0].store.journalMentions(qualify(article.path));
+      const index = mentions.length ? `\n\njournal: ${mentions.join(", ")}` : "";
+      return `${title}\n${head}\n\n${article.body}`.trim() + index;
     }
     case "write": {
       if (!path) return "write needs a path.";
@@ -107,8 +109,14 @@ function run(runtime: CanonRuntime, params: Record<string, unknown>): string {
     case "journal": {
       const body = typeof params.body === "string" ? params.body.trim() : "";
       if (!body) return "journal needs a body: what happened, densely.";
-      /* Events are project history; the journal always lives in the project store. */
-      const subject = Array.isArray(params.subject) ? params.subject.map((s) => normalize(String(s), cwd)) : undefined;
+      /* Events are project history; the journal always lives in the project store,
+         with subjects qualified so mounted articles index them too. */
+      const subject = Array.isArray(params.subject)
+        ? params.subject.map((s) => {
+            const routed = route(runtime, String(s));
+            return routed.mount.name ? `${routed.mount.name}:${routed.path}` : routed.path;
+          })
+        : undefined;
       const file = runtime.mounts[0].store.journal({
         body,
         subject,

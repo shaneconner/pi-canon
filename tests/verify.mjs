@@ -59,12 +59,8 @@ store.write("src/core/config", {
   capsule: "Loads layered config; env beats file.",
   body: "Current truth about config loading.",
 });
-/* Aliases are hand-edited front matter, the documented rename path. */
-const configFile = join(projDir, ".canon/wiki/src/core/config.md");
-writeFileSync(configFile, readFileSync(configFile, "utf8").replace("---\ncapsule:", "---\naliases: [src/config]\ncapsule:"));
 const back = store.read("src/core/config");
 assert.equal(back.capsule, "Loads layered config; env beats file.");
-assert.deepEqual(back.aliases, ["src/config"]);
 assert.equal(back.body.trim(), "Current truth about config loading.");
 pass("write and read round trip");
 
@@ -135,16 +131,6 @@ assert.equal(store.resolve("src/core/config/deep/child.ts").path, "src/core/conf
 assert.equal(store.resolve("no/such/thing"), undefined);
 pass("resolve walks to the nearest ancestor and misses honestly");
 
-assert.equal(store.resolve("src/config").path, "src/core/config");
-assert.equal(store.lookup("src/config").path, "src/core/config");
-pass("aliases keep old addresses resolving");
-
-assert.ok(store.resolve("src/config"));
-const edited = readFileSync(configFile, "utf8").replace("aliases: [src/config]", "aliases: [src/config, src/legacy]");
-writeFileSync(configFile, edited);
-assert.equal(store.resolve("src/legacy").path, "src/core/config");
-pass("a hand-edited alias resolves without a restart");
-
 const j1 = store.journal({ body: "Project inception.", slug: "inception", subject: ["src/core/config"] });
 const j2 = store.journal({ body: "Second entry, same slug.", slug: "inception" });
 assert.notEqual(j1, j2);
@@ -155,6 +141,10 @@ pass("journal entries are immutable files; wx EEXIST is the retry signal");
 
 assert.match(j1.split("/").at(-1), new RegExp(`^${today}-inception\\.md$`));
 pass("journal files carry their date");
+
+assert.deepEqual(store.journalMentions("src/core/config"), [`${today}-inception.md`]);
+assert.deepEqual(store.journalMentions("no/such/thing"), []);
+pass("journal entries index by subject");
 
 const mapped = store.map();
 assert.match(mapped, /src\/core\/config: Loads layered config/);
@@ -179,11 +169,11 @@ pass("capsule advice: missing and oversized");
 assert.ok(advise({ ...back, path: "ops/logs/2026-08-10" }, store).some((a) => a.includes("journal")));
 pass("journalish addresses draw a redirect to the journal");
 
-const linkAdvice = advise({ ...back, body: "See [[src/config]], [[src/core/config.ts]], [[missing/page]]." }, store);
+const linkAdvice = advise({ ...back, body: "See [[src/core/config]], [[src/core/config.ts]], [[missing/page]]." }, store);
 assert.ok(linkAdvice.some((a) => a.includes("[[missing/page]]")));
-assert.ok(!linkAdvice.some((a) => a.includes("[[src/config]]")));
+assert.ok(!linkAdvice.some((a) => a.includes("[[src/core/config]]")));
 assert.ok(!linkAdvice.some((a) => a.includes("[[src/core/config.ts]]")));
-pass("dead links are named; alias and extension-carrying links are not false positives");
+pass("dead links are named; live and extension-carrying links are not false positives");
 
 /* --- surfacing ------------------------------------------------------------------ */
 
@@ -318,6 +308,7 @@ pass("settle delivers the write after reminder for the next turn");
 
 const result = await tools[0].execute("id", { action: "read", path: "src/core/config" }, undefined, undefined, ctx);
 assert.match(result.content[0].text, /Current truth about config loading/);
+assert.match(result.content[0].text, new RegExp(`journal: ${today}-inception\\.md`));
 const absolute = await tools[0].execute(
   "id",
   { action: "write", path: join(projDir, "src/newthing.ts"), body: "New.", capsule: "" },

@@ -10,14 +10,13 @@ import { dirname, join } from "node:path";
 export interface Article {
   path: string;
   capsule: string;
-  aliases: string[];
   updated: string;
   extra: string[];
   body: string;
 }
 
 const FRONT_MATTER = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
-const OWNED_KEYS = new Set(["capsule", "aliases", "updated"]);
+const OWNED_KEYS = new Set(["capsule", "updated"]);
 
 /* Keep an address inside the tree: .. resolves against its own segments, so
    a/b/../c means a/c, and clamps at the root, so nothing ever escapes. */
@@ -68,12 +67,7 @@ function parseFrontMatter(text: string): {
       extra.push(line);
       continue;
     }
-    const value = pair[2].trim();
-    /* aliases is the one list-valued key; every other value is a plain string. */
-    meta[pair[1]] =
-      pair[1] === "aliases"
-        ? value.replace(/^\[/, "").replace(/\]$/, "").split(",").map((item) => unscalar(item.trim())).filter(Boolean)
-        : unscalar(value);
+    meta[pair[1]] = unscalar(pair[2].trim());
   }
   return { meta, extra, body: text.slice(match[0].length) };
 }
@@ -104,7 +98,6 @@ function today(): string {
 function serialize(article: Article): string {
   const meta = [
     article.capsule ? `capsule: ${scalar(article.capsule)}` : "",
-    article.aliases.length ? `aliases: [${article.aliases.map(scalar).join(", ")}]` : "",
     `updated: ${article.updated}`,
     ...article.extra,
   ].filter(Boolean).join("\n");
@@ -140,23 +133,16 @@ export class CanonStore {
       body,
       extra,
       capsule: typeof meta.capsule === "string" ? meta.capsule : "",
-      aliases: Array.isArray(meta.aliases) ? meta.aliases : [],
       updated: typeof meta.updated === "string" ? meta.updated : "",
     };
   }
 
-  /* Exact address or a registered alias; no ancestor walk. */
-  lookup(path: string): Article | undefined {
-    return this.read(path) ?? this.read(this.aliases().get(normalize(path)) ?? "");
-  }
-
-  /* The closest existing article governs the asset: exact address, then alias,
-     then nearest ancestor. */
+  /* The closest existing article governs the asset: exact address, then the
+     nearest ancestor. */
   resolve(asset: string, cwd = ""): Article | undefined {
     let path = normalize(asset, cwd);
-    const aliases = this.aliases();
     while (path) {
-      const article = this.read(path) ?? this.read(aliases.get(normalize(path)) ?? "");
+      const article = this.read(path);
       if (article) return article;
       const cut = path.lastIndexOf("/");
       path = cut === -1 ? "" : path.slice(0, cut);
@@ -183,7 +169,6 @@ export class CanonStore {
     const article: Article = {
       path,
       capsule: (fields.capsule ?? prior?.capsule ?? "").replace(/\s*\n\s*/g, " ").trim(),
-      aliases: prior?.aliases ?? [],
       updated: today(),
       extra: prior?.extra ?? [],
       body: fields.body ?? prior?.body ?? "",
@@ -222,6 +207,22 @@ export class CanonStore {
     }
   }
 
+  /* Journal entries whose subject names this address: the index a read surfaces
+     so the agent can dig into event history when it wants more than current truth. */
+  journalMentions(path: string): string[] {
+    try {
+      return readdirSync(this.journalDir)
+        .filter((name) => {
+          if (!name.endsWith(".md")) return false;
+          const subject = /^subject:\s*(.*)$/m.exec(readFileSync(join(this.journalDir, name), "utf8"))?.[1] ?? "";
+          return subject.replace(/^\[|\]$/g, "").split(",").some((s) => s.trim() === path);
+        })
+        .sort();
+    } catch {
+      return [];
+    }
+  }
+
   map(under = ""): string {
     const paths = this.list().filter((path) => !under || path === under || path.startsWith(`${under}/`));
     if (!paths.length) return under ? `No articles under ${under}.` : "The wiki is empty.";
@@ -233,13 +234,4 @@ export class CanonStore {
       .join("\n");
   }
 
-  /* Built fresh per lookup: a hand-edited aliases line resolves immediately, and the
-     tree is small enough that the cache this replaced cost more than it saved. */
-  private aliases(): Map<string, string> {
-    const map = new Map<string, string>();
-    for (const path of this.list()) {
-      for (const alias of this.read(path)?.aliases ?? []) map.set(normalize(alias), path);
-    }
-    return map;
-  }
 }

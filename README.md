@@ -24,12 +24,11 @@ Articles are markdown with a few owned lines of front matter, each with a job:
 
     ---
     capsule: Loads layered config; env beats file; secrets never land here.
-    aliases: [src/config]
     updated: 2026-08-10
     ---
     The body: dense current understanding of this asset.
 
-`capsule` is the one dense line surfacing injects. `aliases` keep old addresses resolving after a rename. `updated` is the staleness stamp readers can discount by.
+`capsule` is the one dense line surfacing injects. `updated` is the date of the last write. Rename an asset by moving its article with it; lint names any wikilinks that go dead. Foreign front matter keys, such as Obsidian properties, ride through writes untouched.
 
 The tree is plain markdown and a valid Obsidian vault. Commit it with your repo: git is the history, diff, blame, and time machine. pi-canon never runs git itself. Journal entries are ordinary files too: pi_canon only appends them; read them with normal file tools.
 
@@ -47,6 +46,8 @@ One tool, `pi_canon`, four actions:
 | `write` | create or update an article; returns advisory lint, never refuses |
 | `journal` | append an event entry; pi_canon never rewrites one |
 | `map` | list articles with their capsules |
+
+Entries logged with `subject` addresses reappear as a one-line journal index when those articles are read, so event history is there to dig into without ever loading by default.
 
 ## Options
 

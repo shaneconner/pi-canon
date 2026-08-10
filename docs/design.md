@@ -8,13 +8,13 @@ Three-tier memory: short term is the context window, episodic is pi-fold, long t
 
 ## Addressing
 
-The wiki address is the asset path with its file extension dropped. Identity mapping needs zero configuration and makes the spine a convention instead of a mode: an article that matches no asset is simply free knowledge, and no flag distinguishes it. Resolution walks up to the nearest existing ancestor, so the rule is at most one canonical home, not one article per file. Renames are one line of `aliases` front matter; addresses are locators, and the alias keeps old references resolving.
+The wiki address is the asset path with its file extension dropped. Identity mapping needs zero configuration and makes the spine a convention instead of a mode: an article that matches no asset is simply free knowledge, and no flag distinguishes it. Resolution walks up to the nearest existing ancestor, so the rule is at most one canonical home, not one article per file. Renames are a file move: the article travels with its asset, and lint names any wikilink that goes dead. An aliases layer was built and then deleted; a moved file plus a named dead link beats maintaining a parallel address book.
 
 Assets outside the project mount by directory: each mount carries its own `.canon` beside the assets it governs, addressed by basename (`lake:prices`). Sharing needs no protocol; two workspaces that mount the same directory read and write the same store, and git on that directory is the sync.
 
 ## Storage
 
-Plain markdown under `.canon/`, committed with the repo. Git supplies history, merge, blame, and time travel; pi-canon runs no git itself and holds no database. Front matter is a strict YAML subset (single line values, inline arrays) parsed in forty lines instead of a dependency; keys written by other tools, such as Obsidian properties, are carried through writes untouched. Journal entries are one file each, created with the `wx` flag: append-only through the tool, since pi-canon can never overwrite an entry, and EEXIST is the retry signal, so concurrent writers each land on their own file.
+Plain markdown under `.canon/`, committed with the repo. Git supplies history, merge, blame, and time travel; pi-canon runs no git itself and holds no database. Front matter is a strict YAML subset (single line values, inline arrays) parsed in forty lines instead of a dependency; keys written by other tools, such as Obsidian properties, are carried through writes untouched. Journal entries are one file each, created with the `wx` flag: append-only through the tool, since pi-canon can never overwrite an entry, and EEXIST is the retry signal, so concurrent writers each land on their own file. Entries carrying `subject` addresses double as an index: read lists their filenames beneath the article, history on offer but never loaded by default.
 
 ## Surfacing
 
@@ -22,7 +22,7 @@ Tool call inputs are scanned for path-shaped strings that exist on disk or are a
 
 ## Lint
 
-Advisory strings returned from write, never a refusal: a blocked write teaches an agent to stop writing. Warn past 8000 chars, large past 20000, a fold-up hint under 400 when a parent exists. Journalish addresses draw a redirect to the journal. Dead wikilinks are named; alias links are not false positives.
+Advisory strings returned from write, never a refusal: a blocked write teaches an agent to stop writing. Warn past 8000 chars, large past 20000, a fold-up hint under 400 when a parent exists. Split at asset boundaries first; past large, the article goes hierarchical, staying as summary and router while detail moves to children at chunks worth loading separately. Journalish addresses draw a redirect to the journal. Dead wikilinks are named.
 
 ## Constants over options
 

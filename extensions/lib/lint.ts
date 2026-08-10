@@ -16,15 +16,16 @@ export function advise(article: Article, store: CanonStore): string[] {
 
   if (size > BODY_LARGE_CHARS) {
     advice.push(
-      `Body is ${size} chars (large past ${BODY_LARGE_CHARS}). Densify, or split children under ` +
-        `${article.path}/ and leave a router summary here.`,
+      `Body is ${size} chars (large past ${BODY_LARGE_CHARS}). Go hierarchical: keep this article ` +
+        `as the summary and router, and move detail into children under ${article.path}/ at chunks ` +
+        `worth loading separately.`,
     );
   } else if (size > BODY_WARN_CHARS) {
     advice.push(`Body is ${size} chars (warn past ${BODY_WARN_CHARS}). Densify before it needs splitting.`);
   } else if (size > 0 && size < BODY_TINY_CHARS) {
     const parent = parentOf(article.path);
     if (parent && store.read(parent)) {
-      advice.push(`Body is ${size} chars. Consider folding it into ${parent}; split at asset boundaries, never for size.`);
+      advice.push(`Body is ${size} chars. Consider folding it into ${parent}; keep children only at real asset or chunk boundaries.`);
     }
   }
 
@@ -42,7 +43,7 @@ export function advise(article: Article, store: CanonStore): string[] {
 
   for (const match of article.body.matchAll(/\[\[([^\]|#]+)[^\]]*\]\]/g)) {
     const target = match[1].trim().replace(/\.md$/, "");
-    if (!store.lookup(target) && !store.lookup(normalize(target))) {
+    if (!store.read(target) && !store.read(normalize(target))) {
       advice.push(`Link [[${match[1]}]] resolves to no article.`);
     }
   }
