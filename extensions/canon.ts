@@ -61,7 +61,7 @@ export function registerPiCanon(pi: any, options: CanonOptions = {}): void {
     const text = count
       ? `[pi-canon] ${count} article${count === 1 ? "" : "s"} govern this project. Read the governing ` +
         "article before working on an asset; update it after real changes."
-      : "[pi-canon] The wiki at .canon/ is empty. When work teaches you something durable about an " +
+      : "[pi-canon] No articles yet in .canon/. When work teaches you something durable about an " +
         "asset, write its article with pi_canon; log events with journal.";
     deliver(pi, text, "nextTurn");
   });

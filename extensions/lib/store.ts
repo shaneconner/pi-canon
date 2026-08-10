@@ -1,5 +1,5 @@
 /* Article and journal storage: a plain markdown tree under one root.
-   wiki/<path>.md is the article governing asset <path>; journal/ holds immutable
+   articles/<path>.md is the article governing asset <path>; journal/ holds immutable
    entries. Front matter is a strict YAML subset (single line values, inline arrays)
    so the tree stays hand editable and Obsidian readable with no parser dependency;
    keys this package does not own are carried through writes untouched. */
@@ -111,8 +111,8 @@ export class CanonStore {
     this.root = root;
   }
 
-  get wikiDir(): string {
-    return join(this.root, "wiki");
+  get articlesDir(): string {
+    return join(this.root, "articles");
   }
 
   get journalDir(): string {
@@ -120,7 +120,7 @@ export class CanonStore {
   }
 
   private fileFor(path: string): string {
-    return join(this.wikiDir, `${path}.md`);
+    return join(this.articlesDir, `${path}.md`);
   }
 
   read(path: string): Article | undefined {
@@ -160,7 +160,7 @@ export class CanonStore {
       }
       return paths;
     };
-    return walk(this.wikiDir, "").sort();
+    return walk(this.articlesDir, "").sort();
   }
 
   write(path: string, fields: { capsule?: string; body?: string }): Article {
@@ -225,7 +225,7 @@ export class CanonStore {
 
   map(under = ""): string {
     const paths = this.list().filter((path) => !under || path === under || path.startsWith(`${under}/`));
-    if (!paths.length) return under ? `No articles under ${under}.` : "The wiki is empty.";
+    if (!paths.length) return under ? `No articles under ${under}.` : "No articles yet.";
     return paths
       .map((path) => {
         const capsule = this.read(path)?.capsule;

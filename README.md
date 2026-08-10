@@ -8,13 +8,13 @@ Agent knowledge bases rot in two ways. Agents cannot tell which article is THE a
 
 pi-canon answers both structurally:
 
-- The wiki address IS the asset path. `src/core/config.ts` is governed by `wiki/src/core/config.md`; a data lake path like `lake/fundamentals/market_cap` works the same way. One place to look, nothing to search.
+- The article address IS the asset path. `src/core/config.ts` is governed by `articles/src/core/config.md`; a data lake path like `lake/fundamentals/market_cap` works the same way. One place to look, nothing to search.
 - The journal is a separate, immutable tier. Events go there; articles hold only the current best understanding.
 
 ## The store
 
     .canon/
-      wiki/
+      articles/
         src/core/config.md        article governing src/core/config.*
         lake/prices.md            articles are not limited to code
       journal/
@@ -30,11 +30,11 @@ Articles are markdown with a few owned lines of front matter, each with a job:
 
 `capsule` is the one dense line surfacing injects. `updated` is the date of the last write. Rename an asset by moving its article with it; lint names any wikilinks that go dead. Foreign front matter keys, such as Obsidian properties, ride through writes untouched.
 
-The tree is plain markdown and a valid Obsidian vault. Commit it with your repo: git is the history, diff, blame, and time machine. pi-canon never runs git itself. Journal entries are ordinary files too: pi_canon only appends them; read them with normal file tools.
+The tree is plain markdown and a valid Obsidian vault; if you think of it as a project wiki, that is the right instinct, with one rule added: every article has exactly one canonical address. Commit it with your repo: git is the history, diff, blame, and time machine. pi-canon never runs git itself. Journal entries are ordinary files too: pi_canon only appends them; read them with normal file tools.
 
 ## Surfacing
 
-Each session opens with one orientation line: how many articles govern the project, or an invitation to start the wiki when it is empty. When a tool call touches an asset whose governing article has not been seen this session, pi-canon stages the capsule; each turn delivers everything staged as one bounded message, once per article per session, under a hard budget (pointers only once it is spent). Resolution walks up: the nearest existing ancestor article governs, so not every file needs an article. After the agent settles, touched but not updated articles draw a single reminder. `/pi-canon` prints a status line: articles, journal entries, and what surfacing has spent this session.
+Each session opens with one orientation line: how many articles govern the project, or an invitation to write the first one. When a tool call touches an asset whose governing article has not been seen this session, pi-canon stages the capsule; each turn delivers everything staged as one bounded message, once per article per session, under a hard budget (pointers only once it is spent). Resolution walks up: the nearest existing ancestor article governs, so not every file needs an article. After the agent settles, touched but not updated articles draw a single reminder. `/pi-canon` prints a status line: articles, journal entries, and what surfacing has spent this session.
 
 ## Tool
 

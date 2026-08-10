@@ -80,15 +80,15 @@ pass("a bracketed capsule is a string, not a list, and survives a rewrite");
 const yamlish = "Config: env wins; keep # comments current.";
 store.write("src/yamlish", { capsule: yamlish, body: "b" });
 assert.equal(store.read("src/yamlish").capsule, yamlish);
-assert.match(readFileSync(join(projDir, ".canon/wiki/src/yamlish.md"), "utf8"), /capsule: "Config: env wins; keep # comments current\."/);
+assert.match(readFileSync(join(projDir, ".canon/articles/src/yamlish.md"), "utf8"), /capsule: "Config: env wins; keep # comments current\."/);
 pass("colons and hashes in a capsule are quoted into valid YAML and read back");
 
 writeFileSync(
-  join(projDir, ".canon/wiki/src/crlf.md"),
+  join(projDir, ".canon/articles/src/crlf.md"),
   "---\r\ncapsule: Windows born.\r\nowner: shane\r\n---\r\nCRLF body.\r\n",
 );
 store.write("src/crlf", { capsule: "Rewritten." });
-const crlf = readFileSync(join(projDir, ".canon/wiki/src/crlf.md"), "utf8");
+const crlf = readFileSync(join(projDir, ".canon/articles/src/crlf.md"), "utf8");
 assert.equal((crlf.match(/^---$/gm) ?? []).length, 2);
 assert.match(crlf, /owner: shane/);
 assert.match(crlf, /CRLF body\./);
@@ -96,15 +96,15 @@ assert.equal(store.read("src/crlf").capsule, "Rewritten.");
 pass("a CRLF article survives a capsule-only write without nesting front matter");
 
 writeFileSync(
-  join(projDir, ".canon/wiki/src/blocky.md"),
+  join(projDir, ".canon/articles/src/blocky.md"),
   "---\naliases:\n  - src/old-blocky\ncapsule: Blocky.\n---\nBody.\n",
 );
 store.write("src/blocky", { body: "New body." });
-assert.match(readFileSync(join(projDir, ".canon/wiki/src/blocky.md"), "utf8"), /aliases:\n {2}- src\/old-blocky/);
+assert.match(readFileSync(join(projDir, ".canon/articles/src/blocky.md"), "utf8"), /aliases:\n {2}- src\/old-blocky/);
 pass("a block-style aliases list survives a write");
 
 writeFileSync(
-  join(projDir, ".canon/wiki/src/handmade.md"),
+  join(projDir, ".canon/articles/src/handmade.md"),
   "---\ncapsule: Hand written.\ntags:\n  - a\n  - b\nowner: shane\n---\nBody.\n",
 );
 const handmade = store.read("src/handmade");
@@ -113,7 +113,7 @@ assert.equal(handmade.body.trim(), "Body.");
 pass("foreign front matter keys are tolerated, not errors");
 
 store.write("src/handmade", { body: "New body." });
-const rewritten = readFileSync(join(projDir, ".canon/wiki/src/handmade.md"), "utf8");
+const rewritten = readFileSync(join(projDir, ".canon/articles/src/handmade.md"), "utf8");
 assert.match(rewritten, /tags:\n {2}- a\n {2}- b/);
 assert.match(rewritten, /owner: shane/);
 assert.match(rewritten, /capsule: Hand written\./);
@@ -121,8 +121,8 @@ pass("foreign keys survive a write, multi-line blocks included");
 
 const escaped = store.write("../../journal/clobber", { body: "contained" });
 assert.equal(escaped.path, "journal/clobber");
-assert.ok(existsSync(join(projDir, ".canon/wiki/journal/clobber.md")));
-pass("a traversal address is contained inside wiki/");
+assert.ok(existsSync(join(projDir, ".canon/articles/journal/clobber.md")));
+pass("a traversal address is contained inside articles/");
 
 assert.equal(store.resolve("src/core/config.ts", "").path, "src/core/config");
 pass("resolve hits the exact address");
@@ -291,7 +291,7 @@ assert.equal(sent[0].opts.deliverAs, "nextTurn");
 pass("a session opens with one orientation line");
 
 for (const fn of handlers.tool_call) fn({ toolName: "read", toolCallId: "t1", input: { path: join(projDir, "src/core/config.ts") } }, ctx);
-for (const fn of handlers.tool_call) fn({ toolName: "read", toolCallId: "t2", input: { path: join(projDir, ".canon/wiki/src/wikilinked.md") } }, ctx);
+for (const fn of handlers.tool_call) fn({ toolName: "read", toolCallId: "t2", input: { path: join(projDir, ".canon/articles/src/wikilinked.md") } }, ctx);
 assert.equal(sent.length, 1);
 for (const fn of handlers.turn_end) fn({ turnIndex: 0 }, ctx);
 assert.equal(sent.length, 2);
@@ -376,7 +376,7 @@ registerPiCanon(
 );
 for (const fn of coldHandlers.session_start) fn({ reason: "startup" }, { cwd: coldDir });
 assert.equal(coldSent.length, 1);
-assert.match(coldSent[0].msg.content, /wiki at \.canon\/ is empty/);
+assert.match(coldSent[0].msg.content, /No articles yet in .canon\//);
 pass("an empty store opens with the invitation to start it");
 
 assert.ok(advise({ ...back, capsule: "Added inventory pagination and stock aggregation." }, store)
@@ -403,12 +403,12 @@ pass("surface: false silences every nudge");
 const rootTools = [];
 registerPiCanon({ on() {}, registerTool: (t) => rootTools.push(t), registerCommand() {} }, { root: "kb" });
 await rootTools[0].execute("id", { action: "write", path: "notes/a", body: "A.", capsule: "A." }, undefined, undefined, ctx);
-assert.ok(existsSync(join(projDir, "kb/wiki/notes/a.md")));
+assert.ok(existsSync(join(projDir, "kb/articles/notes/a.md")));
 const absRoot = join(work, "abs-canon");
 const absTools = [];
 registerPiCanon({ on() {}, registerTool: (t) => absTools.push(t), registerCommand() {} }, { root: absRoot });
 await absTools[0].execute("id", { action: "write", path: "notes/b", body: "B.", capsule: "B." }, undefined, undefined, ctx);
-assert.ok(existsSync(join(absRoot, "wiki/notes/b.md")));
+assert.ok(existsSync(join(absRoot, "articles/notes/b.md")));
 pass("root places the store, relative to the project or absolute");
 
 const imported = spawnSync(
@@ -431,7 +431,7 @@ await lakeTools[0].execute(
   undefined,
   ctx,
 );
-assert.ok(existsSync(join(lakeDir, ".canon/wiki/fundamentals/market_cap.md")));
+assert.ok(existsSync(join(lakeDir, ".canon/articles/fundamentals/market_cap.md")));
 const lakeRead = await lakeTools[0].execute(
   "id",
   { action: "read", path: join(lakeDir, "fundamentals/market_cap.csv") },

@@ -4,7 +4,7 @@ Decisions and the reasons they beat their alternatives. Written 2026-08-10, at v
 
 ## Shape
 
-Three-tier memory: short term is the context window, episodic is pi-fold, long term is pi-canon. One package ships the store (wiki and journal), the surfacing layer, and the tool with its advisory lint. They stay together because the rare parts (asset addressing, read-before / write-after, capsule injection) ARE the surfacing mechanism; a knowledge store without its enforcement mechanism rots the way unread convention files rot. The spine is not a component: it is the addressing convention itself, and it holds because nothing has to opt into it.
+Three-tier memory: short term is the context window, episodic is pi-fold, long term is pi-canon. One package ships the store (articles and journal), the surfacing layer, and the tool with its advisory lint. They stay together because the rare parts (asset addressing, read-before / write-after, capsule injection) ARE the surfacing mechanism; a knowledge store without its enforcement mechanism rots the way unread convention files rot. The spine is not a component: it is the addressing convention itself, and it holds because nothing has to opt into it.
 
 ## Addressing
 
