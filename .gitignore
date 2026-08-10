@@ -1,0 +1,11 @@
+node_modules/
+
+# Workspace layer: personal memory wiring, harness config, scratch.
+# The public repo is the package alone.
+AGENTS.md
+CLAUDE.md
+.mcp.json
+.claude/
+lab/
+.canon/
+*.log
