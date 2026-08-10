@@ -4,12 +4,25 @@
    turn matters: pi's steering queue drains one message per provider round trip, so
    a message per tool call would buy each nudge its own extra LLM call. */
 
-import { existsSync } from "node:fs";
+import { appendFileSync, existsSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 import type { CanonStore } from "./store.ts";
 
 export const SESSION_BUDGET_CHARS = 4000;
 const MESSAGE_CHARS = 2000;
+
+/* Observability, env-gated and inert otherwise: PI_CANON_TRACE=<file> appends one
+   JSON line per surfacing decision, so a harness can audit the staged -> flushed ->
+   seen funnel instead of guessing at it. */
+function trace(kind: string, data: Record<string, unknown>): void {
+  const file = process.env.PI_CANON_TRACE;
+  if (!file) return;
+  try {
+    appendFileSync(file, JSON.stringify({ at: new Date().toISOString(), kind, ...data }) + "\n");
+  } catch {
+    /* tracing must never break surfacing */
+  }
+}
 
 const PATHLIKE = /(?:^|[\s"'`=:,([{])(\/?[\w.@-]+(?:\/[\w.@-]+)+)/g;
 
@@ -47,6 +60,7 @@ export class Surfacer {
   }
 
   markSeen(path: string): void {
+    if (this.staged.has(path)) trace("withdrawn", { path });
     this.seen.add(path);
     this.staged.delete(path);
   }
@@ -96,6 +110,7 @@ export class Surfacer {
       if (this.seen.has(key) || this.staged.has(key)) continue;
       const stamp = article.updated ? ` (updated ${article.updated})` : "";
       this.staged.set(key, { capsule: article.capsule, stamp, asset });
+      trace("staged", { path: key, asset });
     }
   }
 
@@ -123,6 +138,7 @@ export class Surfacer {
       this.staged.delete(path);
     }
     const plural = lines.length > 1 ? "s" : "";
+    trace("flushed", { lines: lines.length, spent: this.spent });
     return (
       `[pi-canon] Governing article${plural} for what this turn touches. Read the full article with ` +
       `pi_canon before depending on details; update it after real changes.\n${lines.join("\n")}`
@@ -135,6 +151,7 @@ export class Surfacer {
     const stale = [...this.pendingUpdates];
     this.pendingUpdates.clear();
     if (!stale.length) return undefined;
+    trace("settle-nudge", { paths: stale });
     return (
       `[pi-canon] Touched but not updated: ${stale.join(", ")}. If this work changed what is true, ` +
       `update the article with pi_canon; if nothing durable changed, leave it.`

@@ -166,12 +166,20 @@ export class CanonStore {
   write(path: string, fields: { capsule?: string; body?: string }): Article {
     path = contain(path);
     const prior = this.read(path);
+    /* Agents sometimes paste a whole file as the body, front matter included; stored
+       verbatim that nests a second front matter block inside the article. Strip a
+       leading block only when its lines all look like front matter keys. */
+    let body = fields.body ?? prior?.body ?? "";
+    const block = FRONT_MATTER.exec(body);
+    if (block && block[1].split(/\r?\n/).every((line) => /^[\w-]+:\s|^\s*$/.test(line))) {
+      body = body.slice(block[0].length).trimStart();
+    }
     const article: Article = {
       path,
       capsule: (fields.capsule ?? prior?.capsule ?? "").replace(/\s*\n\s*/g, " ").trim(),
       updated: today(),
       extra: prior?.extra ?? [],
-      body: fields.body ?? prior?.body ?? "",
+      body,
     };
     const file = this.fileFor(path);
     mkdirSync(dirname(file), { recursive: true });

@@ -11,9 +11,29 @@ const BODY_TINY_CHARS = 400;
 const JOURNALISH = /(^|\/)(logs?|journal|sessions?|standups?|meetings?)(\/|$)|\d{4}-\d{2}-\d{2}/i;
 const EVENTISH = /^(added|updated|fixed|changed|implemented|removed|refactored|renamed|migrated|verified)\b/i;
 
-export function advise(article: Article, store: CanonStore): string[] {
+const CONSTRAINT = /\b(must|never|always|require[sd]?|do not|don't)\b/i;
+
+export function advise(article: Article, store: CanonStore, priorBody?: string): string[] {
   const advice: string[] = [];
   const size = article.body.length;
+
+  /* The laundering guard: an agent that just violated a documented constraint will
+     faithfully update the article to describe the violation as current truth. Name
+     what disappeared; whether it still holds is the agent's call, stated out loud. */
+  if (priorBody !== undefined) {
+    const kept = article.body.replace(/\s+/g, " ");
+    const dropped = priorBody
+      .split(/\r?\n/)
+      .map((line) => line.replace(/^[-*\s]+/, "").trim())
+      .filter((line) => CONSTRAINT.test(line) && !kept.includes(line.replace(/\s+/g, " ")))
+      .slice(0, 2);
+    for (const line of dropped) {
+      advice.push(
+        `This write dropped constraint language: "${line.slice(0, 160)}". If it still holds, keep it; ` +
+          "if it genuinely changed, journal what changed it.",
+      );
+    }
+  }
 
   if (size > BODY_LARGE_CHARS) {
     advice.push(

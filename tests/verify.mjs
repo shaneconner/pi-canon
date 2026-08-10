@@ -467,4 +467,56 @@ assert.equal(entryTools[0].name, "pi_canon");
 assert.equal(typeof entry.registerPiCanon, "function");
 pass("the package entry exposes the default and named exports pi loads");
 
+/* --- study-driven guards ---------------------------------------------------------- */
+
+const pasted = store.write("src/pasted", {
+  capsule: "Real capsule.",
+  body: "---\ncapsule: duplicate line\nupdated: 2026-08-10\n---\n\nThe actual body.",
+});
+assert.equal(pasted.body, "The actual body.");
+assert.equal(pasted.capsule, "Real capsule.");
+const ruled = store.write("src/ruled", { body: "---\n\nNot front matter, an hrule.\n\n---\nMore." });
+assert.match(ruled.body, /^---/);
+pass("a body pasted with its own front matter is stripped; an hrule body is not");
+
+store.write("src/lawful", { capsule: "c", body: "Amounts must remain integer cents in report.txt.\nOther prose." });
+const priorLawful = store.read("src/lawful").body;
+const laundered = advise(store.write("src/lawful", { body: "Amounts are formatted as dollars now." }), store, priorLawful);
+assert.ok(laundered.some((a) => a.includes("dropped constraint language") && a.includes("must remain integer cents")));
+const kept = advise(store.write("src/lawful", { body: "Amounts must remain integer cents in report.txt.\nNew prose." }), store, priorLawful);
+assert.ok(!kept.some((a) => a.includes("dropped constraint language")));
+pass("a write that deletes a must/never line is named; keeping the line stays silent");
+
+const singleDir = join(work, "single");
+mkdirSync(join(singleDir, "src"), { recursive: true });
+const singleStore = new CanonStore(join(singleDir, ".canon"));
+singleStore.write("src/only", { capsule: "one", body: "b" });
+const singleSent = [];
+const singlePi = {
+  on: (name, fn) => (handlers[`single_${name}`] ??= []).push(fn),
+  registerTool() {},
+  registerCommand() {},
+  sendMessage: (msg, opts) => singleSent.push({ msg, opts }),
+};
+registerPiCanon(singlePi, {});
+for (const fn of handlers.single_session_start) fn({ reason: "startup" }, { cwd: singleDir, ui: { notify() {} } });
+assert.match(singleSent[0].msg.content, /1 article governs this project/);
+pass("the orientation line agrees with a single article");
+
+assert.match(tools[0].description, /shared parent/);
+pass("the tool description carries the filing rule");
+
+const traceFile = join(work, "trace.jsonl");
+process.env.PI_CANON_TRACE = traceFile;
+const surfTrace = new Surfacer([{ name: "", dir: projDir, store }]);
+surfTrace.collect([join(projDir, "src/core/config.ts")]);
+surfTrace.flush();
+surfTrace.collect([join(projDir, "src/core/other.ts")]);
+surfTrace.markSeen("src/core");
+delete process.env.PI_CANON_TRACE;
+const traceLines = readFileSync(traceFile, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+assert.ok(traceLines.some((t) => t.kind === "staged"));
+assert.ok(traceLines.some((t) => t.kind === "flushed"));
+pass("PI_CANON_TRACE audits the staged and flushed funnel");
+
 console.log(`\nall ${gates} gates green`);

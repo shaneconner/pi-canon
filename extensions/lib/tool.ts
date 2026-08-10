@@ -38,7 +38,9 @@ export function buildCanonTool(ready: (ctx: unknown) => CanonRuntime) {
       "Canonical project memory. Every asset has at most one governing article at its own address " +
       "(src/core/config, lake/prices). read the governing article before working on an asset; " +
       "write it after real changes. journal appends an immutable event entry; map lists articles " +
-      "with their capsules. Creation is rare: prefer updating the article that already governs.",
+      "with their capsules. Creation is rare: prefer updating the article that already governs. " +
+      "File a constraint at the asset it governs, or the shared parent when it spans assets, not " +
+      "the asset you happened to edit; knowledge filed off the asset path never surfaces.",
     parameters: {
       type: "object",
       properties: {
@@ -104,12 +106,13 @@ function run(runtime: CanonRuntime, params: Record<string, unknown>): string {
       if (!path) return "write needs a path.";
       /* Blank means untouched: models fill declared string fields with "" routinely,
          and a "" here would silently erase stored content. */
+      const priorBody = params.body ? store.read(path)?.body : undefined;
       const article = store.write(path, {
         capsule: params.capsule ? String(params.capsule) : undefined,
         body: params.body ? String(params.body) : undefined,
       });
       surfacer.markUpdated(qualify(article.path));
-      return [`Wrote ${qualify(article.path)}.`, ...advise(article, store)].join("\n");
+      return [`Wrote ${qualify(article.path)}.`, ...advise(article, store, priorBody)].join("\n");
     }
     case "journal": {
       const body = typeof params.body === "string" ? params.body.trim() : "";
