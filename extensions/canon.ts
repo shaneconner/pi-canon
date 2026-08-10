@@ -60,9 +60,11 @@ export function registerPiCanon(pi: any, options: CanonOptions = {}): void {
     const count = store.list().length;
     const text = count
       ? `[pi-canon] ${count} ${count === 1 ? "article governs" : "articles govern"} this project. Read the governing ` +
-        "article before working on an asset; update it after real changes."
+        "article before working on an asset; after real changes update it and journal the " +
+        "source: names, exact numbers, who said what. Articles distill; the journal keeps the original."
       : "[pi-canon] No articles yet in .canon/. When work teaches you something durable about an " +
-        "asset, write its article with pi_canon; log events with journal.";
+        "asset, write its article with pi_canon and journal the source as it happened: names, " +
+        "exact numbers, who said what. Articles distill; the journal keeps the original.";
     deliver(pi, text, "nextTurn");
   });
 

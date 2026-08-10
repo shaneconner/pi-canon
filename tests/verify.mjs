@@ -506,6 +506,15 @@ pass("the orientation line agrees with a single article");
 assert.match(tools[0].description, /shared parent/);
 pass("the tool description carries the filing rule");
 
+assert.match(tools[0].description, /names and exact numbers/);
+assert.match(tools[0].parameters.properties.body.description, /specifics beat summaries/);
+pass("the journal verb teaches source capture and write teaches specifics");
+
+assert.match(sent[0].msg.content, /journal the source/);
+assert.match(coldSent[0].msg.content, /journal the source/);
+assert.match(coldSent[0].msg.content, /Articles distill; the journal keeps the original/);
+pass("both orientation branches carry the journal-the-source doctrine");
+
 const traceFile = join(work, "trace.jsonl");
 process.env.PI_CANON_TRACE = traceFile;
 const surfTrace = new Surfacer([{ name: "", dir: projDir, store }]);

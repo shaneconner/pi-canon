@@ -9,7 +9,7 @@ Agent knowledge bases rot in two ways. Agents cannot tell which article is THE a
 pi-canon answers both structurally:
 
 - The article address IS the asset path. `src/core/config.ts` is governed by `articles/src/core/config.md`; a data lake path like `lake/fundamentals/market_cap` works the same way. One place to look, nothing to search.
-- The journal is a separate, immutable tier. Events go there; articles hold only the current best understanding.
+- The journal is a separate, immutable tier. The source goes there as it happened, names and exact numbers included; articles hold only the current best understanding. An article can compress or drift, the journal entry underneath it cannot, so the original is always one hop away.
 
 ## The store
 
@@ -44,7 +44,7 @@ One tool, `pi_canon`, four actions:
 |---|---|
 | `read` | the article at an address; a miss points to the nearest governing ancestor |
 | `write` | create or update an article; returns advisory lint, never refuses |
-| `journal` | append an event entry; pi_canon never rewrites one |
+| `journal` | append an event entry, source details intact; pi_canon never rewrites one |
 | `map` | list articles with their capsules |
 
 Entries logged with `subject` addresses reappear as a one-line journal index when those articles are read, so event history is there to dig into without ever loading by default.

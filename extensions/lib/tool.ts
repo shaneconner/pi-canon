@@ -37,8 +37,10 @@ export function buildCanonTool(ready: (ctx: unknown) => CanonRuntime) {
     description:
       "Canonical project memory. Every asset has at most one governing article at its own address " +
       "(src/core/config, lake/prices). read the governing article before working on an asset; " +
-      "write it after real changes. journal appends an immutable event entry; map lists articles " +
-      "with their capsules. Creation is rare: prefer updating the article that already governs. " +
+      "write it after real changes. journal appends an immutable event entry: record the source " +
+      "as it happened, names and exact numbers included, because articles distill and only the " +
+      "journal keeps the original. map lists articles with their capsules. " +
+      "Creation is rare: prefer updating the article that already governs. " +
       "File a constraint at the asset it governs, or the shared parent when it spans assets, not " +
       "the asset you happened to edit; knowledge filed off the asset path never surfaces.",
     parameters: {
@@ -49,7 +51,12 @@ export function buildCanonTool(ready: (ctx: unknown) => CanonRuntime) {
           type: "string",
           description: "Article address, e.g. src/core/config. Required for read and write; optional filter for map.",
         },
-        body: { type: "string", description: "write: the full article body. journal: the event text." },
+        body: {
+          type: "string",
+          description:
+            "write: the full article body; specifics beat summaries (who consumes what, exact " +
+            "limits, what breaks). journal: the event text, source details intact.",
+        },
         capsule: { type: "string", description: "write: one dense line injected when the asset is touched." },
         subject: {
           type: "array",
