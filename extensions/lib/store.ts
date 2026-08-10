@@ -4,12 +4,11 @@
    so the tree stays hand editable and Obsidian readable with no parser dependency;
    keys this package does not own are carried through writes untouched. */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 export interface Article {
   path: string;
-  file: string;
   capsule: string;
   aliases: string[];
   updated: string;
@@ -17,18 +16,23 @@ export interface Article {
   body: string;
 }
 
-export const CAPSULE_CHARS = 1000;
-
 const FRONT_MATTER = /^---\n([\s\S]*?)\n---\n?/;
 const OWNED_KEYS = new Set(["capsule", "aliases", "updated"]);
 
-/* An asset address: relative to the project, dot segments removed so an address can
-   never leave the wiki tree, file extension dropped so src/core/config.ts shares its
-   article's address. */
+/* Keep an address inside the tree: dot segments removed so it can never escape. */
+function contain(path: string): string {
+  return path.split("/").filter((part) => part && part !== "." && part !== "..").join("/");
+}
+
+/* An asset address: relative to the project, contained, file extension dropped so
+   src/core/config.ts shares its article's address. The drop happens once, here at
+   the boundary; the store itself never drops again, or config.test would lose its
+   .test on the way to disk. */
 export function normalize(asset: string, cwd = ""): string {
   let path = asset.trim().replace(/\\/g, "/");
   if (cwd && (path === cwd || path.startsWith(`${cwd}/`))) path = path.slice(cwd.length);
-  path = path.split("/").filter((part) => part && part !== "." && part !== "..").join("/");
+  path = contain(path);
+  /* Drop the extension only when something precedes the dot, so .env stays .env. */
   const dot = path.lastIndexOf(".");
   if (dot > path.lastIndexOf("/") + 1) path = path.slice(0, dot);
   return path;
@@ -50,15 +54,19 @@ function parseFrontMatter(text: string): {
       if (keepingForeign) extra.push(line);
       continue;
     }
-    keepingForeign = !OWNED_KEYS.has(pair[1]);
+    /* An owned key with an empty value is a block list (Obsidian's aliases shape).
+       Blocks are not ours to parse, so the whole thing rides along as foreign. */
+    keepingForeign = !OWNED_KEYS.has(pair[1]) || !pair[2].trim();
     if (keepingForeign) {
       extra.push(line);
       continue;
     }
     const value = pair[2].trim();
-    meta[pair[1]] = value.startsWith("[") && value.endsWith("]")
-      ? value.slice(1, -1).split(",").map((item) => item.trim()).filter(Boolean)
-      : value;
+    /* aliases is the one list-valued key; every other value is a plain string. */
+    meta[pair[1]] =
+      pair[1] === "aliases"
+        ? value.replace(/^\[/, "").replace(/\]$/, "").split(",").map((item) => item.trim()).filter(Boolean)
+        : value;
   }
   return { meta, extra, body: text.slice(match[0].length) };
 }
@@ -78,9 +86,11 @@ function serialize(article: Article): string {
 }
 
 export class CanonStore {
-  private aliasIndex?: { key: string; map: Map<string, string> };
+  readonly root: string;
 
-  constructor(readonly root: string) {}
+  constructor(root: string) {
+    this.root = root;
+  }
 
   get wikiDir(): string {
     return join(this.root, "wiki");
@@ -101,7 +111,6 @@ export class CanonStore {
     const { meta, extra, body } = parseFrontMatter(readFileSync(file, "utf8"));
     return {
       path,
-      file,
       body,
       extra,
       capsule: typeof meta.capsule === "string" ? meta.capsule : "",
@@ -119,8 +128,9 @@ export class CanonStore {
      then nearest ancestor. */
   resolve(asset: string, cwd = ""): Article | undefined {
     let path = normalize(asset, cwd);
+    const aliases = this.aliases();
     while (path) {
-      const article = this.lookup(path);
+      const article = this.read(path) ?? this.read(aliases.get(normalize(path)) ?? "");
       if (article) return article;
       const cut = path.lastIndexOf("/");
       path = cut === -1 ? "" : path.slice(0, cut);
@@ -141,21 +151,20 @@ export class CanonStore {
     return walk(this.wikiDir, "").sort();
   }
 
-  write(path: string, fields: { capsule?: string; body?: string; aliases?: string[] }): Article {
-    path = normalize(path);
+  write(path: string, fields: { capsule?: string; body?: string }): Article {
+    path = contain(path);
     const prior = this.read(path);
     const article: Article = {
       path,
-      file: this.fileFor(path),
       capsule: (fields.capsule ?? prior?.capsule ?? "").replace(/\s*\n\s*/g, " ").trim(),
-      aliases: fields.aliases ?? prior?.aliases ?? [],
+      aliases: prior?.aliases ?? [],
       updated: today(),
       extra: prior?.extra ?? [],
       body: fields.body ?? prior?.body ?? "",
     };
-    mkdirSync(dirname(article.file), { recursive: true });
-    writeFileSync(article.file, serialize(article));
-    this.aliasIndex = undefined;
+    const file = this.fileFor(path);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, serialize(article));
     return article;
   }
 
@@ -179,6 +188,14 @@ export class CanonStore {
     }
   }
 
+  journalCount(): number {
+    try {
+      return readdirSync(this.journalDir).filter((name) => name.endsWith(".md")).length;
+    } catch {
+      return 0;
+    }
+  }
+
   map(under = ""): string {
     const paths = this.list().filter((path) => !under || path === under || path.startsWith(`${under}/`));
     if (!paths.length) return under ? `No articles under ${under}.` : "The wiki is empty.";
@@ -190,23 +207,13 @@ export class CanonStore {
       .join("\n");
   }
 
-  /* Rebuilt whenever the tree changes shape or content, so a hand-edited aliases
-     line resolves without a restart. Freshness is a stat pass, not a read pass. */
+  /* Built fresh per lookup: a hand-edited aliases line resolves immediately, and the
+     tree is small enough that the cache this replaced cost more than it saved. */
   private aliases(): Map<string, string> {
-    const paths = this.list();
-    let newest = 0;
-    for (const path of paths) {
-      const mtime = statSync(this.fileFor(path), { throwIfNoEntry: false })?.mtimeMs ?? 0;
-      if (mtime > newest) newest = mtime;
+    const map = new Map<string, string>();
+    for (const path of this.list()) {
+      for (const alias of this.read(path)?.aliases ?? []) map.set(normalize(alias), path);
     }
-    const key = `${paths.length}:${newest}`;
-    if (this.aliasIndex?.key !== key) {
-      const map = new Map<string, string>();
-      for (const path of paths) {
-        for (const alias of this.read(path)?.aliases ?? []) map.set(normalize(alias), path);
-      }
-      this.aliasIndex = { key, map };
-    }
-    return this.aliasIndex.map;
+    return map;
   }
 }

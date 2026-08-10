@@ -4,7 +4,7 @@ Decisions and the reasons they beat their alternatives. Written 2026-08-10, at v
 
 ## Shape
 
-Three-tier memory: short term is the context window, episodic is pi-fold, long term is pi-canon. Four parts ship in one package: wiki, journal, spine, surfacing. They stay together because the rare parts (asset addressing, read-before / write-after, capsule injection) ARE the surfacing mechanism; a knowledge store without its enforcement mechanism rots the way unread convention files rot.
+Three-tier memory: short term is the context window, episodic is pi-fold, long term is pi-canon. One package ships the store (wiki and journal), the surfacing layer, and the tool with its advisory lint. They stay together because the rare parts (asset addressing, read-before / write-after, capsule injection) ARE the surfacing mechanism; a knowledge store without its enforcement mechanism rots the way unread convention files rot. The spine is not a component: it is the addressing convention itself, and it holds because nothing has to opt into it.
 
 ## Addressing
 
@@ -16,7 +16,7 @@ Plain markdown under `.canon/`, committed with the repo. Git supplies history, m
 
 ## Surfacing
 
-Tool call inputs are scanned for path-shaped tokens that exist on disk; each resolves to its governing article and stages its capsule. Each turn flushes the staged lines as ONE steered message: pi's steering queue drains one message per provider round trip, so a message per tool call would buy every nudge its own extra LLM call. Once per article per session, under a hard budget, pointers after; an article counts as seen only when its line is part of a flushed message. The write-after half is one reminder at agent settle naming touched but not updated articles. No embeddings in v1: deterministic resolution beats similarity for asset-scoped knowledge, and the nudge discipline (once, bounded, silenceable) is pi-fold's proven pattern.
+Tool call inputs are scanned for path-shaped tokens that exist on disk; each resolves to its governing article and stages its capsule. Each turn flushes the staged lines as ONE steered message: pi's steering queue drains one message per provider round trip, so a message per tool call would buy every nudge its own extra LLM call. Once per article per session, under a hard budget, pointers after; an article counts as seen, and its capsule charged against the budget, only when its line is part of a flushed message, so a nudge withdrawn by an actual read costs nothing. The write-after half is one reminder at agent settle naming touched but not updated articles. No embeddings in v1: deterministic resolution beats similarity for asset-scoped knowledge, and the nudge discipline (once, bounded, silenceable) is pi-fold's proven pattern.
 
 ## Lint
 

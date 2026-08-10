@@ -77,9 +77,11 @@ function run(runtime: CanonRuntime, params: Record<string, unknown>): string {
     }
     case "write": {
       if (!path) return "write needs a path.";
+      /* Blank means untouched: models fill declared string fields with "" routinely,
+         and a "" here would silently erase stored content. */
       const article = store.write(path, {
-        capsule: typeof params.capsule === "string" ? params.capsule : undefined,
-        body: typeof params.body === "string" ? params.body : undefined,
+        capsule: params.capsule ? String(params.capsule) : undefined,
+        body: params.body ? String(params.body) : undefined,
       });
       surfacer.markUpdated(article.path);
       return [`Wrote ${article.path}.`, ...advise(article, store)].join("\n");

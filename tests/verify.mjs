@@ -2,7 +2,8 @@
    Run: node tests/verify.mjs */
 
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,8 +12,8 @@ import { createJiti } from "jiti";
 const projectRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const jiti = createJiti(import.meta.url);
 
-const { CanonStore, normalize, CAPSULE_CHARS } = await jiti.import(join(projectRoot, "extensions/lib/store.ts"));
-const { advise, BODY_WARN_CHARS, BODY_LARGE_CHARS } = await jiti.import(join(projectRoot, "extensions/lib/lint.ts"));
+const { CanonStore, normalize } = await jiti.import(join(projectRoot, "extensions/lib/store.ts"));
+const { advise, BODY_WARN_CHARS, BODY_LARGE_CHARS, CAPSULE_CHARS } = await jiti.import(join(projectRoot, "extensions/lib/lint.ts"));
 const { Surfacer, SESSION_BUDGET_CHARS } = await jiti.import(join(projectRoot, "extensions/lib/surfacing.ts"));
 const { registerPiCanon } = await jiti.import(join(projectRoot, "extensions/canon.ts"));
 
@@ -54,8 +55,10 @@ pass("the prefix strip respects the path boundary");
 store.write("src/core/config", {
   capsule: "Loads layered config; env beats file.",
   body: "Current truth about config loading.",
-  aliases: ["src/config"],
 });
+/* Aliases are hand-edited front matter, the documented rename path. */
+const configFile = join(projDir, ".canon/wiki/src/core/config.md");
+writeFileSync(configFile, readFileSync(configFile, "utf8").replace("---\ncapsule:", "---\naliases: [src/config]\ncapsule:"));
 const back = store.read("src/core/config");
 assert.equal(back.capsule, "Loads layered config; env beats file.");
 assert.deepEqual(back.aliases, ["src/config"]);
@@ -68,6 +71,20 @@ pass("write stamps updated");
 store.write("src/wikilinked", { capsule: "[[src/core]] parent; env beats file.", body: "b" });
 assert.equal(store.read("src/wikilinked").capsule, "[[src/core]] parent; env beats file.");
 pass("a capsule opening with a wikilink survives the round trip");
+
+store.write("src/bracket", { capsule: "[deprecated] superseded by [[src/core/config]].", body: "b" });
+assert.equal(store.read("src/bracket").capsule, "[deprecated] superseded by [[src/core/config]].");
+store.write("src/bracket", { body: "b2" });
+assert.equal(store.read("src/bracket").capsule, "[deprecated] superseded by [[src/core/config]].");
+pass("a bracketed capsule is a string, not a list, and survives a rewrite");
+
+writeFileSync(
+  join(projDir, ".canon/wiki/src/blocky.md"),
+  "---\naliases:\n  - src/old-blocky\ncapsule: Blocky.\n---\nBody.\n",
+);
+store.write("src/blocky", { body: "New body." });
+assert.match(readFileSync(join(projDir, ".canon/wiki/src/blocky.md"), "utf8"), /aliases:\n {2}- src\/old-blocky/);
+pass("a block-style aliases list survives a write");
 
 writeFileSync(
   join(projDir, ".canon/wiki/src/handmade.md"),
@@ -87,7 +104,7 @@ pass("foreign keys survive a write, multi-line blocks included");
 
 const escaped = store.write("../../journal/clobber", { body: "contained" });
 assert.equal(escaped.path, "journal/clobber");
-assert.ok(escaped.file.includes("/.canon/wiki/journal/clobber.md"));
+assert.ok(existsSync(join(projDir, ".canon/wiki/journal/clobber.md")));
 pass("a traversal address is contained inside wiki/");
 
 assert.equal(store.resolve("src/core/config.ts", "").path, "src/core/config");
@@ -101,13 +118,9 @@ assert.equal(store.resolve("src/config").path, "src/core/config");
 assert.equal(store.lookup("src/config").path, "src/core/config");
 pass("aliases keep old addresses resolving");
 
-const aliasFile = join(projDir, ".canon/wiki/src/core/config.md");
-const primed = store.resolve("src/config");
-assert.ok(primed);
-const edited = readFileSync(aliasFile, "utf8").replace("aliases: [src/config]", "aliases: [src/config, src/legacy]");
-writeFileSync(aliasFile, edited);
-const soon = new Date(Date.now() + 5000);
-utimesSync(aliasFile, soon, soon);
+assert.ok(store.resolve("src/config"));
+const edited = readFileSync(configFile, "utf8").replace("aliases: [src/config]", "aliases: [src/config, src/legacy]");
+writeFileSync(configFile, edited);
 assert.equal(store.resolve("src/legacy").path, "src/core/config");
 pass("a hand-edited alias resolves without a restart");
 
@@ -190,7 +203,8 @@ const surfSeen = new Surfacer(store, projDir);
 surfSeen.collect([join(projDir, "src/core/config.ts")]);
 surfSeen.markSeen("src/core/config");
 assert.equal(surfSeen.flush(), undefined);
-pass("reading an article withdraws its staged nudge");
+assert.equal(surfSeen.stats.spent, 0);
+pass("reading an article withdraws its staged nudge and spends no budget");
 
 const surfSettle = new Surfacer(store, projDir);
 surfSettle.collect([join(projDir, "src/core/config.ts")]);
@@ -272,6 +286,28 @@ const misread = await tools[0].execute("id", { action: "read", path: "src/core/c
 assert.match(misread.content[0].text, /Nearest governing article: src\/core\/config/);
 pass("the tool strips absolute paths to addresses, writes with advice, journals, and teaches on a miss");
 
+const dotted = await tools[0].execute(
+  "id",
+  { action: "write", path: join(projDir, "src/core/config.test.ts"), body: "Test notes.", capsule: "Covers config." },
+  undefined,
+  undefined,
+  ctx,
+);
+assert.match(dotted.content[0].text, /Wrote src\/core\/config\.test\./);
+assert.equal(store.read("src/core/config.test").body.trim(), "Test notes.");
+assert.equal(store.read("src/core/config").body.trim(), "Current truth about config loading.");
+pass("writing config.test.ts lands beside config, never on top of it");
+
+await tools[0].execute("id", { action: "write", path: "src/newthing", body: "", capsule: "" }, undefined, undefined, ctx);
+assert.equal(store.read("src/newthing").body.trim(), "New.");
+pass("an empty-string body or capsule leaves stored content untouched");
+
+const mapped2 = await tools[0].execute("id", { action: "map", path: "src/core" }, undefined, undefined, ctx);
+assert.match(mapped2.content[0].text, /src\/core\/config: Loads layered config/);
+const bogus = await tools[0].execute("id", { action: "bogus" }, undefined, undefined, ctx);
+assert.match(bogus.content[0].text, /Unknown action "bogus"/);
+pass("map answers through the tool and unknown actions name themselves");
+
 for (const fn of handlers.agent_settled) fn(undefined, ctx);
 assert.equal(sent.length, 2);
 pass("a quiet session stays quiet");
@@ -299,5 +335,24 @@ for (const fn of surfOffHandlers.turn_end ?? []) fn({ turnIndex: 0 }, ctx);
 for (const fn of surfOffHandlers.agent_settled ?? []) fn(undefined, ctx);
 assert.equal(surfOffSent.length, 0);
 pass("surface: false silences every nudge");
+
+const rootTools = [];
+registerPiCanon({ on() {}, registerTool: (t) => rootTools.push(t), registerCommand() {} }, { root: "kb" });
+await rootTools[0].execute("id", { action: "write", path: "notes/a", body: "A.", capsule: "A." }, undefined, undefined, ctx);
+assert.ok(existsSync(join(projDir, "kb/wiki/notes/a.md")));
+const absRoot = join(work, "abs-canon");
+const absTools = [];
+registerPiCanon({ on() {}, registerTool: (t) => absTools.push(t), registerCommand() {} }, { root: absRoot });
+await absTools[0].execute("id", { action: "write", path: "notes/b", body: "B.", capsule: "B." }, undefined, undefined, ctx);
+assert.ok(existsSync(join(absRoot, "wiki/notes/b.md")));
+pass("root places the store, relative to the project or absolute");
+
+const imported = spawnSync(
+  process.execPath,
+  ["--input-type=module", "-e", `await import(${JSON.stringify(join(projectRoot, "extensions/index.js"))});`],
+  { encoding: "utf8" },
+);
+assert.equal(imported.status, 0, imported.stderr);
+pass("the entry point loads under plain node, no jiti");
 
 console.log(`\nall ${gates} gates green`);

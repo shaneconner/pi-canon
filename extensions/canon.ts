@@ -1,6 +1,5 @@
 /* pi-canon: canonical project memory for Pi. Wiring only; mechanics live in lib/. */
 
-import { readdirSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { CanonStore } from "./lib/store.ts";
 import { SESSION_BUDGET_CHARS, Surfacer } from "./lib/surfacing.ts";
@@ -13,15 +12,12 @@ export interface CanonOptions {
   surface?: boolean;
 }
 
-const OPTION_NAMES = new Set(["root", "surface"]);
-
 export function registerPiCanon(pi: any, options: CanonOptions = {}): void {
-  for (const key of Object.keys(options)) {
-    if (!OPTION_NAMES.has(key)) {
-      throw new Error(
-        `pi-canon: unknown option "${key}". The options are root and surface; everything else is a constant on purpose.`,
-      );
-    }
+  const unknown = Object.keys(options).find((key) => key !== "root" && key !== "surface");
+  if (unknown) {
+    throw new Error(
+      `pi-canon: unknown option "${unknown}". The options are root and surface; everything else is a constant on purpose.`,
+    );
   }
   const surface = options.surface !== false;
 
@@ -75,20 +71,12 @@ export function registerPiCanon(pi: any, options: CanonOptions = {}): void {
       const { store, surfacer } = ready(ctx);
       const { surfaced, spent } = surfacer.stats;
       ctx.ui.notify(
-        `pi-canon at ${store.root}: ${store.list().length} articles, ${countJournal(store)} journal ` +
+        `pi-canon at ${store.root}: ${store.list().length} articles, ${store.journalCount()} journal ` +
           `entries; ${surfaced} surfaced this session (${spent} of ${SESSION_BUDGET_CHARS} capsule chars).`,
         "info",
       );
     },
   });
-}
-
-function countJournal(store: CanonStore): number {
-  try {
-    return readdirSync(store.journalDir).filter((name) => name.endsWith(".md")).length;
-  } catch {
-    return 0;
-  }
 }
 
 function deliver(pi: any, content: string, deliverAs: "steer" | "nextTurn"): void {

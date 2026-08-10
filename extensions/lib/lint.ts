@@ -1,11 +1,12 @@
 /* Advisory only: advice strings, never a refusal. A blocked write teaches an agent
    to stop writing; a warning teaches it what to do next. */
 
-import { CAPSULE_CHARS, normalize, type Article, type CanonStore } from "./store.ts";
+import { normalize, type Article, type CanonStore } from "./store.ts";
 
 export const BODY_WARN_CHARS = 8000;
 export const BODY_LARGE_CHARS = 20000;
-export const BODY_TINY_CHARS = 400;
+export const CAPSULE_CHARS = 1000;
+const BODY_TINY_CHARS = 400;
 
 const JOURNALISH = /(^|\/)(logs?|journal|sessions?|standups?|meetings?)(\/|$)|\d{4}-\d{2}-\d{2}/i;
 

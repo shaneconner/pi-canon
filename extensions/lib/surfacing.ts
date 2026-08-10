@@ -10,19 +10,21 @@ import type { CanonStore } from "./store.ts";
 
 export const SESSION_BUDGET_CHARS = 4000;
 
-const PATHLIKE = /(?:^|\\[nrt]|[\s"'`=:,([{])(\/?(?:\.{1,2}\/)?[\w.@-]+(?:\/[\w.@-]+)+)/g;
+const PATHLIKE = /(?:^|\\[nrt]|[\s"'`=:,([{])(\/?[\w.@-]+(?:\/[\w.@-]+)+)/g;
 
 export class Surfacer {
+  private store: CanonStore;
+  private cwd: string;
   private seen = new Set<string>();
   private updatedPaths = new Set<string>();
   private touched = new Set<string>();
-  private staged = new Map<string, string>();
+  private staged = new Map<string, { capsule: string; stamp: string; asset: string }>();
   private spent = 0;
 
-  constructor(
-    private store: CanonStore,
-    private cwd: string,
-  ) {}
+  constructor(store: CanonStore, cwd: string) {
+    this.store = store;
+    this.cwd = cwd;
+  }
 
   markSeen(path: string): void {
     this.seen.add(path);
@@ -52,7 +54,7 @@ export class Surfacer {
     return [...found];
   }
 
-  /* Stage a line for each newly touched governing article. Nothing is sent here. */
+  /* Stage each newly touched governing article. Nothing is sent or spent here. */
   collect(assets: string[]): void {
     for (const asset of assets) {
       const article = this.store.resolve(asset, this.cwd);
@@ -60,23 +62,25 @@ export class Surfacer {
       this.touched.add(article.path);
       if (this.seen.has(article.path) || this.staged.has(article.path)) continue;
       const stamp = article.updated ? ` (updated ${article.updated})` : "";
-      let line: string;
-      if (article.capsule && this.spent + article.capsule.length <= SESSION_BUDGET_CHARS) {
-        this.spent += article.capsule.length;
-        line = `${article.path}${stamp}: ${article.capsule}`;
-      } else {
-        line = `${article.path}${stamp}: article exists. Read it before relying on ${asset}.`;
-      }
-      this.staged.set(article.path, line);
+      this.staged.set(article.path, { capsule: article.capsule, stamp, asset });
     }
   }
 
-  /* Everything staged since the last flush, as one message; articles count as seen
-     only once their line is actually part of a flushed message. */
+  /* Everything staged since the last flush, as one message. The budget is charged
+     here, not at staging, so a nudge withdrawn by markSeen costs nothing; articles
+     count as seen only once their line is actually part of a flushed message. */
   flush(): string | undefined {
     if (!this.staged.size) return undefined;
-    const lines = [...this.staged.values()];
-    for (const path of this.staged.keys()) this.seen.add(path);
+    const lines: string[] = [];
+    for (const [path, { capsule, stamp, asset }] of this.staged) {
+      if (capsule && this.spent + capsule.length <= SESSION_BUDGET_CHARS) {
+        this.spent += capsule.length;
+        lines.push(`${path}${stamp}: ${capsule}`);
+      } else {
+        lines.push(`${path}${stamp}: article exists. Read it before relying on ${asset}.`);
+      }
+      this.seen.add(path);
+    }
     this.staged.clear();
     const plural = lines.length > 1 ? "s" : "";
     return (

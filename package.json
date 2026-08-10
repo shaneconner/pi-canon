@@ -13,16 +13,21 @@
   "engines": {
     "node": ">=22"
   },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=0.83.0 <1"
+  },
   "scripts": {
     "test": "node tests/verify.mjs"
   },
-  "keywords": ["pi", "pi-extension", "memory", "knowledge", "agent"],
+  "keywords": ["pi-package", "pi", "pi-extension", "memory", "knowledge", "agent"],
   "author": "Shane Conner",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/shaneconner/pi-canon.git"
   },
+  "bugs": "https://github.com/shaneconner/pi-canon/issues",
+  "homepage": "https://github.com/shaneconner/pi-canon#readme",
   "devDependencies": {
     "jiti": "^2.7.0"
   }
