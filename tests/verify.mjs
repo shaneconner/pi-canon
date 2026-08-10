@@ -348,6 +348,14 @@ await tools[0].execute("id", { action: "write", path: "src/newthing", body: "", 
 assert.equal(store.read("src/newthing").body.trim(), "New.");
 pass("an empty-string body or capsule leaves stored content untouched");
 
+store.write("src/capped", { capsule: "Capped.", body: "b" });
+for (let n = 1; n <= 5; n += 1) store.journal({ body: `Event ${n}.`, slug: "capped-event", subject: ["src/capped"] });
+const capped = await tools[0].execute("id", { action: "read", path: "src/capped" }, undefined, undefined, ctx);
+assert.match(capped.content[0].text, /journal: [^\n]+ and 2 earlier$/);
+assert.equal(capped.content[0].text.split("journal: ")[1].split(" and ")[0].split(", ").length, 3);
+assert.ok(!capped.content[0].text.includes("Event "));
+pass("the journal index shows the newest three filenames and no content");
+
 const mapped2 = await tools[0].execute("id", { action: "map", path: "src/core" }, undefined, undefined, ctx);
 assert.match(mapped2.content[0].text, /src\/core\/config: Loads layered config/);
 const bogus = await tools[0].execute("id", { action: "bogus" }, undefined, undefined, ctx);

@@ -91,8 +91,13 @@ function run(runtime: CanonRuntime, params: Record<string, unknown>): string {
         article.capsule ? `capsule: ${article.capsule}` : "",
         article.updated ? `updated: ${article.updated}` : "",
       ].filter(Boolean).join("\n");
+      /* Filenames only, newest three: the index invites digging, it never pays for it. */
       const mentions = runtime.mounts[0].store.journalMentions(qualify(article.path));
-      const index = mentions.length ? `\n\njournal: ${mentions.join(", ")}` : "";
+      const recent = mentions.slice(-3).reverse();
+      const earlier = mentions.length - recent.length;
+      const index = recent.length
+        ? `\n\njournal: ${recent.join(", ")}${earlier ? ` and ${earlier} earlier` : ""}`
+        : "";
       return `${title}\n${head}\n\n${article.body}`.trim() + index;
     }
     case "write": {
