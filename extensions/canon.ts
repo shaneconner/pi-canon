@@ -3,7 +3,7 @@
 import { readdirSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { CanonStore } from "./lib/store.ts";
-import { Surfacer } from "./lib/surfacing.ts";
+import { SESSION_BUDGET_CHARS, Surfacer } from "./lib/surfacing.ts";
 import { buildCanonTool, type CanonRuntime } from "./lib/tool.ts";
 
 export interface CanonOptions {
@@ -19,7 +19,7 @@ export function registerPiCanon(pi: any, options: CanonOptions = {}): void {
   for (const key of Object.keys(options)) {
     if (!OPTION_NAMES.has(key)) {
       throw new Error(
-        `pi-canon: unknown option "${key}". The surface is root and surface; everything else is a constant on purpose.`,
+        `pi-canon: unknown option "${key}". The options are root and surface; everything else is a constant on purpose.`,
       );
     }
   }
@@ -36,7 +36,7 @@ export function registerPiCanon(pi: any, options: CanonOptions = {}): void {
           : join(cwd, options.root)
         : join(cwd, ".canon");
       const store = new CanonStore(root);
-      runtime = { store, surfacer: new Surfacer(store, cwd) };
+      runtime = { store, surfacer: new Surfacer(store, cwd), cwd };
     }
     return runtime;
   };
@@ -48,26 +48,37 @@ export function registerPiCanon(pi: any, options: CanonOptions = {}): void {
     ready(ctx);
   });
 
+  /* Touches stage; turns flush. One steered message per turn rides the provider
+     round trip that was happening anyway. */
   pi.on("tool_call", (event: any, ctx: any) => {
     if (!surface || event?.toolName === "pi_canon") return;
     const { surfacer } = ready(ctx);
-    const text = surfacer.nudge(surfacer.pathsIn(event?.input));
+    surfacer.collect(surfacer.pathsIn(event?.input));
+  });
+
+  pi.on("turn_end", (_event: unknown, ctx: any) => {
+    if (!surface) return;
+    const text = ready(ctx).surfacer.flush();
     if (text) deliver(pi, text, "steer");
   });
 
   pi.on("agent_settled", (_event: unknown, ctx: any) => {
     if (!surface) return;
-    const text = ready(ctx).surfacer.settleNudge();
+    const { surfacer } = ready(ctx);
+    const text = [surfacer.flush(), surfacer.settleNudge()].filter(Boolean).join("\n");
     if (text) deliver(pi, text, "nextTurn");
   });
 
   pi.registerCommand("pi-canon", {
     description: "pi-canon status: articles, journal entries, surfacing this session",
     handler: async (_args: string, ctx: any) => {
-      const { store } = ready(ctx);
-      const journalCount = countJournal(store);
-      const status = `pi-canon at ${store.root}: ${store.list().length} articles, ${journalCount} journal entries.`;
-      deliver(pi, status, "nextTurn");
+      const { store, surfacer } = ready(ctx);
+      const { surfaced, spent } = surfacer.stats;
+      ctx.ui.notify(
+        `pi-canon at ${store.root}: ${store.list().length} articles, ${countJournal(store)} journal ` +
+          `entries; ${surfaced} surfaced this session (${spent} of ${SESSION_BUDGET_CHARS} capsule chars).`,
+        "info",
+      );
     },
   });
 }
@@ -81,7 +92,6 @@ function countJournal(store: CanonStore): number {
 }
 
 function deliver(pi: any, content: string, deliverAs: "steer" | "nextTurn"): void {
-  if (typeof pi.sendMessage !== "function") return;
   try {
     pi.sendMessage({ customType: "pi-canon", content, display: false }, { deliverAs });
   } catch {

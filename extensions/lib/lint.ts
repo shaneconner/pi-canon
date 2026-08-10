@@ -1,7 +1,7 @@
 /* Advisory only: advice strings, never a refusal. A blocked write teaches an agent
    to stop writing; a warning teaches it what to do next. */
 
-import { CAPSULE_CHARS, type Article, type CanonStore } from "./store.ts";
+import { CAPSULE_CHARS, normalize, type Article, type CanonStore } from "./store.ts";
 
 export const BODY_WARN_CHARS = 8000;
 export const BODY_LARGE_CHARS = 20000;
@@ -41,7 +41,9 @@ export function advise(article: Article, store: CanonStore): string[] {
 
   for (const match of article.body.matchAll(/\[\[([^\]|#]+)[^\]]*\]\]/g)) {
     const target = match[1].trim().replace(/\.md$/, "");
-    if (!store.lookup(target)) advice.push(`Link [[${match[1]}]] resolves to no article.`);
+    if (!store.lookup(target) && !store.lookup(normalize(target))) {
+      advice.push(`Link [[${match[1]}]] resolves to no article.`);
+    }
   }
 
   return advice;

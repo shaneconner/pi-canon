@@ -12,11 +12,11 @@ The wiki address is the asset path with its file extension dropped. Identity map
 
 ## Storage
 
-Plain markdown under `.canon/`, committed with the repo. Git supplies history, merge, blame, and time travel; pi-canon runs no git itself and holds no database. Front matter is a strict YAML subset (single line values, inline arrays) parsed in forty lines instead of a dependency; keys written by other tools, such as Obsidian properties, are ignored rather than errors. Journal entries are one file each, created with the `wx` flag: append-only by construction and conflict-free under concurrent agents.
+Plain markdown under `.canon/`, committed with the repo. Git supplies history, merge, blame, and time travel; pi-canon runs no git itself and holds no database. Front matter is a strict YAML subset (single line values, inline arrays) parsed in forty lines instead of a dependency; keys written by other tools, such as Obsidian properties, are carried through writes untouched. Journal entries are one file each, created with the `wx` flag: append-only by construction, and EEXIST is the retry signal, so concurrent writers each land on their own file.
 
 ## Surfacing
 
-Tool call inputs are scanned for path-shaped tokens that exist on disk; each resolves to its governing article; the capsule is injected once per article per session under a hard budget, pointers after. Delivery is `pi.sendMessage` as a steer: bounded, append-only, never a rewrite of earlier context. The write-after half is one reminder at agent settle naming touched but not updated articles. No embeddings in v1: deterministic resolution beats similarity for asset-scoped knowledge, and the nudge discipline (once, bounded, silenceable) is pi-fold's proven pattern.
+Tool call inputs are scanned for path-shaped tokens that exist on disk; each resolves to its governing article and stages its capsule. Each turn flushes the staged lines as ONE steered message: pi's steering queue drains one message per provider round trip, so a message per tool call would buy every nudge its own extra LLM call. Once per article per session, under a hard budget, pointers after; an article counts as seen only when its line is part of a flushed message. The write-after half is one reminder at agent settle naming touched but not updated articles. No embeddings in v1: deterministic resolution beats similarity for asset-scoped knowledge, and the nudge discipline (once, bounded, silenceable) is pi-fold's proven pattern.
 
 ## Lint
 

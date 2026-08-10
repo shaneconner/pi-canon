@@ -8,6 +8,7 @@ import type { Surfacer } from "./surfacing.ts";
 export interface CanonRuntime {
   store: CanonStore;
   surfacer: Surfacer;
+  cwd: string;
 }
 
 export function buildCanonTool(ready: (ctx: unknown) => CanonRuntime) {
@@ -52,9 +53,9 @@ export function buildCanonTool(ready: (ctx: unknown) => CanonRuntime) {
 }
 
 function run(runtime: CanonRuntime, params: Record<string, unknown>): string {
-  const { store, surfacer } = runtime;
+  const { store, surfacer, cwd } = runtime;
   const action = String(params.action ?? "");
-  const path = typeof params.path === "string" ? normalize(params.path) : "";
+  const path = typeof params.path === "string" ? normalize(params.path, cwd) : "";
 
   switch (action) {
     case "read": {
@@ -86,7 +87,7 @@ function run(runtime: CanonRuntime, params: Record<string, unknown>): string {
     case "journal": {
       const body = typeof params.body === "string" ? params.body.trim() : "";
       if (!body) return "journal needs a body: what happened, densely.";
-      const subject = Array.isArray(params.subject) ? params.subject.map((s) => normalize(String(s))) : undefined;
+      const subject = Array.isArray(params.subject) ? params.subject.map((s) => normalize(String(s), cwd)) : undefined;
       const file = store.journal({
         body,
         subject,

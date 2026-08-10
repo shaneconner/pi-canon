@@ -1,9 +1,10 @@
 /* Article and journal storage: a plain markdown tree under one root.
    wiki/<path>.md is the article governing asset <path>; journal/ holds immutable
    entries. Front matter is a strict YAML subset (single line values, inline arrays)
-   so the tree stays hand editable and Obsidian readable with no parser dependency. */
+   so the tree stays hand editable and Obsidian readable with no parser dependency;
+   keys this package does not own are carried through writes untouched. */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 export interface Article {
@@ -12,37 +13,54 @@ export interface Article {
   capsule: string;
   aliases: string[];
   updated: string;
+  extra: string[];
   body: string;
 }
 
 export const CAPSULE_CHARS = 1000;
 
 const FRONT_MATTER = /^---\n([\s\S]*?)\n---\n?/;
+const OWNED_KEYS = new Set(["capsule", "aliases", "updated"]);
 
-/* An asset address: relative to the project, no leading dot or slash, no trailing
-   slash, file extension dropped so src/core/config.ts shares its article's address. */
+/* An asset address: relative to the project, dot segments removed so an address can
+   never leave the wiki tree, file extension dropped so src/core/config.ts shares its
+   article's address. */
 export function normalize(asset: string, cwd = ""): string {
   let path = asset.trim().replace(/\\/g, "/");
-  if (cwd && path.startsWith(cwd)) path = path.slice(cwd.length);
-  path = path.replace(/^\/+/, "").replace(/^\.{1,2}\//, "").replace(/\/+$/, "");
+  if (cwd && (path === cwd || path.startsWith(`${cwd}/`))) path = path.slice(cwd.length);
+  path = path.split("/").filter((part) => part && part !== "." && part !== "..").join("/");
   const dot = path.lastIndexOf(".");
   if (dot > path.lastIndexOf("/") + 1) path = path.slice(0, dot);
   return path;
 }
 
-function parseFrontMatter(text: string): { meta: Record<string, string | string[]>; body: string } {
+function parseFrontMatter(text: string): {
+  meta: Record<string, string | string[]>;
+  extra: string[];
+  body: string;
+} {
   const match = FRONT_MATTER.exec(text);
-  if (!match) return { meta: {}, body: text };
+  if (!match) return { meta: {}, extra: [], body: text };
   const meta: Record<string, string | string[]> = {};
+  const extra: string[] = [];
+  let keepingForeign = false;
   for (const line of match[1].split("\n")) {
     const pair = /^([A-Za-z][\w-]*):\s*(.*)$/.exec(line);
-    if (!pair) continue;
+    if (!pair) {
+      if (keepingForeign) extra.push(line);
+      continue;
+    }
+    keepingForeign = !OWNED_KEYS.has(pair[1]);
+    if (keepingForeign) {
+      extra.push(line);
+      continue;
+    }
     const value = pair[2].trim();
-    meta[pair[1]] = value.startsWith("[")
-      ? value.replace(/^\[|\]$/g, "").split(",").map((item) => item.trim()).filter(Boolean)
+    meta[pair[1]] = value.startsWith("[") && value.endsWith("]")
+      ? value.slice(1, -1).split(",").map((item) => item.trim()).filter(Boolean)
       : value;
   }
-  return { meta, body: text.slice(match[0].length) };
+  return { meta, extra, body: text.slice(match[0].length) };
 }
 
 function today(): string {
@@ -54,12 +72,13 @@ function serialize(article: Article): string {
     article.capsule ? `capsule: ${article.capsule}` : "",
     article.aliases.length ? `aliases: [${article.aliases.join(", ")}]` : "",
     `updated: ${article.updated}`,
+    ...article.extra,
   ].filter(Boolean).join("\n");
   return `---\n${meta}\n---\n${article.body.trimEnd()}\n`;
 }
 
 export class CanonStore {
-  private aliasIndex?: Map<string, string>;
+  private aliasIndex?: { key: string; map: Map<string, string> };
 
   constructor(readonly root: string) {}
 
@@ -79,11 +98,12 @@ export class CanonStore {
     if (!path) return undefined;
     const file = this.fileFor(path);
     if (!existsSync(file)) return undefined;
-    const { meta, body } = parseFrontMatter(readFileSync(file, "utf8"));
+    const { meta, extra, body } = parseFrontMatter(readFileSync(file, "utf8"));
     return {
       path,
       file,
       body,
+      extra,
       capsule: typeof meta.capsule === "string" ? meta.capsule : "",
       aliases: Array.isArray(meta.aliases) ? meta.aliases : [],
       updated: typeof meta.updated === "string" ? meta.updated : "",
@@ -122,6 +142,7 @@ export class CanonStore {
   }
 
   write(path: string, fields: { capsule?: string; body?: string; aliases?: string[] }): Article {
+    path = normalize(path);
     const prior = this.read(path);
     const article: Article = {
       path,
@@ -129,6 +150,7 @@ export class CanonStore {
       capsule: (fields.capsule ?? prior?.capsule ?? "").replace(/\s*\n\s*/g, " ").trim(),
       aliases: fields.aliases ?? prior?.aliases ?? [],
       updated: today(),
+      extra: prior?.extra ?? [],
       body: fields.body ?? prior?.body ?? "",
     };
     mkdirSync(dirname(article.file), { recursive: true });
@@ -137,16 +159,24 @@ export class CanonStore {
     return article;
   }
 
-  /* Journal entries are immutable: a fresh dated file per entry, never overwritten. */
+  /* Journal entries are immutable: a fresh dated file per entry, wx so nothing is
+     ever overwritten. EEXIST is the retry signal, so concurrent writers each land
+     on their own file instead of one losing its entry. */
   journal(entry: { body: string; slug?: string; subject?: string[] }): string {
     const slug =
       (entry.slug ?? "entry").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "entry";
     mkdirSync(this.journalDir, { recursive: true });
-    let file = join(this.journalDir, `${today()}-${slug}.md`);
-    for (let n = 2; existsSync(file); n += 1) file = join(this.journalDir, `${today()}-${slug}-${n}.md`);
     const front = entry.subject?.length ? `---\nsubject: [${entry.subject.join(", ")}]\n---\n` : "";
-    writeFileSync(file, `${front}${entry.body.trimEnd()}\n`, { flag: "wx" });
-    return file;
+    const text = `${front}${entry.body.trimEnd()}\n`;
+    for (let n = 1; ; n += 1) {
+      const file = join(this.journalDir, `${today()}-${slug}${n > 1 ? `-${n}` : ""}.md`);
+      try {
+        writeFileSync(file, text, { flag: "wx" });
+        return file;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      }
+    }
   }
 
   map(under = ""): string {
@@ -160,13 +190,23 @@ export class CanonStore {
       .join("\n");
   }
 
+  /* Rebuilt whenever the tree changes shape or content, so a hand-edited aliases
+     line resolves without a restart. Freshness is a stat pass, not a read pass. */
   private aliases(): Map<string, string> {
-    if (!this.aliasIndex) {
-      this.aliasIndex = new Map();
-      for (const path of this.list()) {
-        for (const alias of this.read(path)?.aliases ?? []) this.aliasIndex.set(normalize(alias), path);
-      }
+    const paths = this.list();
+    let newest = 0;
+    for (const path of paths) {
+      const mtime = statSync(this.fileFor(path), { throwIfNoEntry: false })?.mtimeMs ?? 0;
+      if (mtime > newest) newest = mtime;
     }
-    return this.aliasIndex;
+    const key = `${paths.length}:${newest}`;
+    if (this.aliasIndex?.key !== key) {
+      const map = new Map<string, string>();
+      for (const path of paths) {
+        for (const alias of this.read(path)?.aliases ?? []) map.set(normalize(alias), path);
+      }
+      this.aliasIndex = { key, map };
+    }
+    return this.aliasIndex.map;
   }
 }

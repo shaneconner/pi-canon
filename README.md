@@ -35,7 +35,7 @@ The tree is plain markdown and a valid Obsidian vault. Commit it with your repo:
 
 ## Surfacing
 
-When a tool call touches an asset whose governing article has not been seen this session, pi-canon injects the capsule, once per article per session, under a hard budget (pointers only once it is spent). Resolution walks up: the nearest existing ancestor article governs, so not every file needs an article. After the agent settles, touched but not updated articles draw a single reminder. Every nudge is a bounded, append-only line; nothing is ever rewritten in place.
+When a tool call touches an asset whose governing article has not been seen this session, pi-canon stages the capsule; each turn delivers everything staged as one bounded message, once per article per session, under a hard budget (pointers only once it is spent). Resolution walks up: the nearest existing ancestor article governs, so not every file needs an article. After the agent settles, touched but not updated articles draw a single reminder. Every nudge is append-only; nothing is ever rewritten in place.
 
 ## Tool
 
