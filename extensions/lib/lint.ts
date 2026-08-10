@@ -9,6 +9,7 @@ export const CAPSULE_CHARS = 1000;
 const BODY_TINY_CHARS = 400;
 
 const JOURNALISH = /(^|\/)(logs?|journal|sessions?|standups?|meetings?)(\/|$)|\d{4}-\d{2}-\d{2}/i;
+const EVENTISH = /^(added|updated|fixed|changed|implemented|removed|refactored|renamed|migrated|verified)\b/i;
 
 export function advise(article: Article, store: CanonStore): string[] {
   const advice: string[] = [];
@@ -35,6 +36,8 @@ export function advise(article: Article, store: CanonStore): string[] {
     advice.push(
       `Capsule is ${article.capsule.length} chars (cap ${CAPSULE_CHARS}). A capsule is one dense line, not a second body.`,
     );
+  } else if (EVENTISH.test(article.capsule)) {
+    advice.push("The capsule reads like a change log. Capsules hold current truth; the event belongs in the journal.");
   }
 
   if (JOURNALISH.test(article.path)) {

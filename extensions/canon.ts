@@ -50,9 +50,20 @@ export function registerPiCanon(pi: any, options: CanonOptions = {}): void {
 
   pi.registerTool(buildCanonTool(ready));
 
+  /* One orientation line per session, riding the first turn: without it a fresh
+     or headless session never hears the doctrine, and the write-after reminder
+     (nextTurn at settle) cannot reach a session that ends when the agent does. */
   pi.on("session_start", (_event: unknown, ctx: any) => {
     runtime = undefined;
-    ready(ctx);
+    const { store } = ready(ctx);
+    if (!surface) return;
+    const count = store.list().length;
+    const text = count
+      ? `[pi-canon] ${count} article${count === 1 ? "" : "s"} govern this project. Read the governing ` +
+        "article before working on an asset; update it after real changes."
+      : "[pi-canon] The wiki at .canon/ is empty. When work teaches you something durable about an " +
+        "asset, write its article with pi_canon; log events with journal.";
+    deliver(pi, text, "nextTurn");
   });
 
   /* Touches stage; turns flush. One steered message per turn rides the provider

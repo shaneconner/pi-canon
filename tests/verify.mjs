@@ -285,25 +285,30 @@ pass("registration wires the tool and the four events");
 const notices = [];
 const ctx = { cwd: projDir, ui: { notify: (msg, level) => notices.push({ msg, level }) } };
 for (const fn of handlers.session_start) fn({ reason: "startup" }, ctx);
+assert.equal(sent.length, 1);
+assert.match(sent[0].msg.content, /\d+ articles govern this project/);
+assert.equal(sent[0].opts.deliverAs, "nextTurn");
+pass("a session opens with one orientation line");
+
 for (const fn of handlers.tool_call) fn({ toolName: "read", toolCallId: "t1", input: { path: join(projDir, "src/core/config.ts") } }, ctx);
 for (const fn of handlers.tool_call) fn({ toolName: "read", toolCallId: "t2", input: { path: join(projDir, ".canon/wiki/src/wikilinked.md") } }, ctx);
-assert.equal(sent.length, 0);
-for (const fn of handlers.turn_end) fn({ turnIndex: 0 }, ctx);
 assert.equal(sent.length, 1);
-assert.match(sent[0].msg.content, /Loads layered config/);
-assert.equal(sent[0].opts.deliverAs, "steer");
+for (const fn of handlers.turn_end) fn({ turnIndex: 0 }, ctx);
+assert.equal(sent.length, 2);
+assert.match(sent[1].msg.content, /Loads layered config/);
+assert.equal(sent[1].opts.deliverAs, "steer");
 pass("touches stage silently; the turn flushes one steer message");
 
 for (const fn of handlers.tool_call) fn({ toolName: "read", toolCallId: "t3", input: { path: join(projDir, "src/core/config.ts") } }, ctx);
 for (const fn of handlers.tool_call) fn({ toolName: "pi_canon", toolCallId: "t4", input: { action: "read", path: "src/core/config" } }, ctx);
 for (const fn of handlers.turn_end) fn({ turnIndex: 1 }, ctx);
-assert.equal(sent.length, 1);
+assert.equal(sent.length, 2);
 pass("repeat touches and pi_canon's own calls stay silent");
 
 for (const fn of handlers.agent_settled) fn(undefined, ctx);
-assert.equal(sent.length, 2);
-assert.match(sent[1].msg.content, /Touched but not updated/);
-assert.equal(sent[1].opts.deliverAs, "nextTurn");
+assert.equal(sent.length, 3);
+assert.match(sent[2].msg.content, /Touched but not updated/);
+assert.equal(sent[2].opts.deliverAs, "nextTurn");
 pass("settle delivers the write after reminder for the next turn");
 
 const result = await tools[0].execute("id", { action: "read", path: "src/core/config" }, undefined, undefined, ctx);
@@ -350,7 +355,7 @@ assert.match(bogus.content[0].text, /Unknown action "bogus"/);
 pass("map answers through the tool and unknown actions name themselves");
 
 for (const fn of handlers.agent_settled) fn(undefined, ctx);
-assert.equal(sent.length, 2);
+assert.equal(sent.length, 3);
 pass("a quiet session stays quiet");
 
 assert.equal(commands.length, 1);
@@ -358,8 +363,26 @@ await commands[0].def.handler("", ctx);
 assert.equal(notices.length, 1);
 assert.match(notices[0].msg, /articles, \d+ journal entries; \d+ seen this session/);
 assert.equal(notices[0].level, "info");
-assert.equal(sent.length, 2);
+assert.equal(sent.length, 3);
 pass("the status command notifies the user and tells the model nothing");
+
+const coldDir = join(work, "cold-proj");
+mkdirSync(coldDir, { recursive: true });
+const coldSent = [];
+const coldHandlers = {};
+registerPiCanon(
+  { on: (n, f) => (coldHandlers[n] ??= []).push(f), registerTool() {}, registerCommand() {}, sendMessage: (msg, opts) => coldSent.push({ msg, opts }) },
+  {},
+);
+for (const fn of coldHandlers.session_start) fn({ reason: "startup" }, { cwd: coldDir });
+assert.equal(coldSent.length, 1);
+assert.match(coldSent[0].msg.content, /wiki at \.canon\/ is empty/);
+pass("an empty store opens with the invitation to start it");
+
+assert.ok(advise({ ...back, capsule: "Added inventory pagination and stock aggregation." }, store)
+  .some((a) => a.includes("change log")));
+assert.ok(!advise(back, store).some((a) => a.includes("change log")));
+pass("a changelog-flavored capsule draws a redirect to current truth");
 
 const surfOffHandlers = {};
 const surfOffSent = [];
