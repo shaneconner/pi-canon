@@ -16,12 +16,19 @@ export interface Article {
   body: string;
 }
 
-const FRONT_MATTER = /^---\n([\s\S]*?)\n---\n?/;
+const FRONT_MATTER = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
 const OWNED_KEYS = new Set(["capsule", "aliases", "updated"]);
 
-/* Keep an address inside the tree: dot segments removed so it can never escape. */
+/* Keep an address inside the tree: .. resolves against its own segments, so
+   a/b/../c means a/c, and clamps at the root, so nothing ever escapes. */
 function contain(path: string): string {
-  return path.split("/").filter((part) => part && part !== "." && part !== "..").join("/");
+  const parts: string[] = [];
+  for (const part of path.split("/")) {
+    if (!part || part === ".") continue;
+    if (part === "..") parts.pop();
+    else parts.push(part);
+  }
+  return parts.join("/");
 }
 
 /* An asset address: relative to the project, contained, file extension dropped so
@@ -48,7 +55,7 @@ function parseFrontMatter(text: string): {
   const meta: Record<string, string | string[]> = {};
   const extra: string[] = [];
   let keepingForeign = false;
-  for (const line of match[1].split("\n")) {
+  for (const line of match[1].split(/\r?\n/)) {
     const pair = /^([A-Za-z][\w-]*):\s*(.*)$/.exec(line);
     if (!pair) {
       if (keepingForeign) extra.push(line);
@@ -65,10 +72,29 @@ function parseFrontMatter(text: string): {
     /* aliases is the one list-valued key; every other value is a plain string. */
     meta[pair[1]] =
       pair[1] === "aliases"
-        ? value.replace(/^\[/, "").replace(/\]$/, "").split(",").map((item) => item.trim()).filter(Boolean)
-        : value;
+        ? value.replace(/^\[/, "").replace(/\]$/, "").split(",").map((item) => unscalar(item.trim())).filter(Boolean)
+        : unscalar(value);
   }
   return { meta, extra, body: text.slice(match[0].length) };
+}
+
+/* Owned values are quoted only when YAML would misread them plain, so the tree
+   stays hand editable and Obsidian keeps parsing it as a vault. */
+const NEEDS_QUOTES = /[:#[\]{}"'`,&*!|>%@\\]|^\s|\s$/;
+
+function scalar(value: string): string {
+  return NEEDS_QUOTES.test(value) ? JSON.stringify(value) : value;
+}
+
+function unscalar(value: string): string {
+  if (value.startsWith('"') && value.endsWith('"')) {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return value;
+    }
+  }
+  return value;
 }
 
 function today(): string {
@@ -77,8 +103,8 @@ function today(): string {
 
 function serialize(article: Article): string {
   const meta = [
-    article.capsule ? `capsule: ${article.capsule}` : "",
-    article.aliases.length ? `aliases: [${article.aliases.join(", ")}]` : "",
+    article.capsule ? `capsule: ${scalar(article.capsule)}` : "",
+    article.aliases.length ? `aliases: [${article.aliases.map(scalar).join(", ")}]` : "",
     `updated: ${article.updated}`,
     ...article.extra,
   ].filter(Boolean).join("\n");

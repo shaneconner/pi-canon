@@ -44,8 +44,11 @@ assert.equal(normalize(`${projDir}/src/core/config.ts`, projDir), "src/core/conf
 pass("normalize strips the project prefix");
 
 assert.equal(normalize("../../journal/x"), "journal/x");
-assert.equal(normalize("a/../../../outside/pwned"), "a/outside/pwned");
-pass("dot segments are removed everywhere; no address escapes the tree");
+assert.equal(normalize("a/../../../outside/pwned"), "outside/pwned");
+pass("dot segments clamp at the root; no address escapes the tree");
+
+assert.equal(normalize("src/core/../other.ts"), "src/other");
+pass("a .. between segments resolves instead of vanishing");
 
 assert.equal(normalize(`${projDir}-vendor/src/thing.ts`, projDir), `${projDir.slice(1)}-vendor/src/thing`);
 pass("the prefix strip respects the path boundary");
@@ -77,6 +80,24 @@ assert.equal(store.read("src/bracket").capsule, "[deprecated] superseded by [[sr
 store.write("src/bracket", { body: "b2" });
 assert.equal(store.read("src/bracket").capsule, "[deprecated] superseded by [[src/core/config]].");
 pass("a bracketed capsule is a string, not a list, and survives a rewrite");
+
+const yamlish = "Config: env wins; keep # comments current.";
+store.write("src/yamlish", { capsule: yamlish, body: "b" });
+assert.equal(store.read("src/yamlish").capsule, yamlish);
+assert.match(readFileSync(join(projDir, ".canon/wiki/src/yamlish.md"), "utf8"), /capsule: "Config: env wins; keep # comments current\."/);
+pass("colons and hashes in a capsule are quoted into valid YAML and read back");
+
+writeFileSync(
+  join(projDir, ".canon/wiki/src/crlf.md"),
+  "---\r\ncapsule: Windows born.\r\nowner: shane\r\n---\r\nCRLF body.\r\n",
+);
+store.write("src/crlf", { capsule: "Rewritten." });
+const crlf = readFileSync(join(projDir, ".canon/wiki/src/crlf.md"), "utf8");
+assert.equal((crlf.match(/^---$/gm) ?? []).length, 2);
+assert.match(crlf, /owner: shane/);
+assert.match(crlf, /CRLF body\./);
+assert.equal(store.read("src/crlf").capsule, "Rewritten.");
+pass("a CRLF article survives a capsule-only write without nesting front matter");
 
 writeFileSync(
   join(projDir, ".canon/wiki/src/blocky.md"),
@@ -166,7 +187,7 @@ pass("dead links are named; alias and extension-carrying links are not false pos
 
 /* --- surfacing ------------------------------------------------------------------ */
 
-const surf = new Surfacer(store, projDir);
+const surf = new Surfacer([{ name: "", dir: projDir, store }]);
 const paths = surf.pathsIn({ file_path: join(projDir, "src/core/config.ts"), note: "no/such/path" });
 assert.deepEqual(paths, [join(projDir, "src/core/config.ts")]);
 pass("pathsIn keeps only paths that exist on disk");
@@ -182,7 +203,7 @@ surf.collect(paths);
 assert.equal(surf.flush(), undefined);
 pass("a governing article surfaces once per session");
 
-const surfBatch = new Surfacer(store, projDir);
+const surfBatch = new Surfacer([{ name: "", dir: projDir, store }]);
 surfBatch.collect([join(projDir, "src/core/config.ts")]);
 surfBatch.collect(["src/wikilinked"]);
 const batched = surfBatch.flush();
@@ -192,21 +213,37 @@ assert.match(batched, /src\/wikilinked/);
 assert.equal(batched.match(/\[pi-canon\]/g).length, 1);
 pass("staged touches coalesce into one flushed message");
 
-const surfBudget = new Surfacer(store, projDir);
+const surfBudget = new Surfacer([{ name: "", dir: projDir, store }]);
 store.write("src/core/other", { capsule: "c".repeat(SESSION_BUDGET_CHARS), body: "b" });
 surfBudget.collect([join(projDir, "src/core/other.ts")]);
 surfBudget.collect([join(projDir, "src/core/config.ts")]);
+assert.match(surfBudget.flush(), /1 more staged; they surface next turn/);
 assert.match(surfBudget.flush(), /article exists\. Read it/);
-pass("a spent budget degrades capsules to pointers");
+pass("a flush is bounded, overflow carries to the next turn, and a spent budget degrades capsules to pointers");
 
-const surfSeen = new Surfacer(store, projDir);
+store.write("src/core", { capsule: "Core module truths.", body: "b" });
+const surfNew = new Surfacer([{ name: "", dir: projDir, store }]);
+const newPaths = surfNew.pathsIn({ file_path: join(projDir, "src/core/brandnew.ts") });
+assert.deepEqual(newPaths, [join(projDir, "src/core/brandnew.ts")]);
+surfNew.collect(newPaths);
+assert.match(surfNew.flush(), /src\/core \(updated .*\): Core module truths/);
+pass("a file about to be created surfaces its governing ancestor");
+
+writeFileSync(join(projDir, "package.json"), "{}\n");
+store.write("package", { capsule: "Package manifest truths.", body: "b" });
+const surfRoot = new Surfacer([{ name: "", dir: projDir, store }]);
+surfRoot.collect(surfRoot.pathsIn({ file_path: "package.json" }));
+assert.match(surfRoot.flush(), /package \(updated .*\): Package manifest truths/);
+pass("root files with no slash still surface");
+
+const surfSeen = new Surfacer([{ name: "", dir: projDir, store }]);
 surfSeen.collect([join(projDir, "src/core/config.ts")]);
 surfSeen.markSeen("src/core/config");
 assert.equal(surfSeen.flush(), undefined);
 assert.equal(surfSeen.stats.spent, 0);
 pass("reading an article withdraws its staged nudge and spends no budget");
 
-const surfSettle = new Surfacer(store, projDir);
+const surfSettle = new Surfacer([{ name: "", dir: projDir, store }]);
 surfSettle.collect([join(projDir, "src/core/config.ts")]);
 surfSettle.flush();
 const settle = surfSettle.settleNudge();
@@ -214,12 +251,22 @@ assert.match(settle, /Touched but not updated: src\/core\/config/);
 assert.equal(surfSettle.settleNudge(), undefined);
 pass("settle reminds once per batch of touches");
 
-const surfDone = new Surfacer(store, projDir);
+const surfDone = new Surfacer([{ name: "", dir: projDir, store }]);
 surfDone.collect([join(projDir, "src/core/config.ts")]);
 surfDone.flush();
 surfDone.markUpdated("src/core/config");
 assert.equal(surfDone.settleNudge(), undefined);
 pass("an updated article draws no settle reminder");
+
+surfDone.collect([join(projDir, "src/core/config.ts")]);
+assert.match(surfDone.settleNudge(), /Touched but not updated: src\/core\/config/);
+pass("an update does not exempt an article from later batches");
+
+const surfOrder = new Surfacer([{ name: "", dir: projDir, store }]);
+surfOrder.markUpdated("src/core/config");
+surfOrder.collect([join(projDir, "src/core/config.ts")]);
+assert.match(surfOrder.settleNudge(), /Touched but not updated: src\/core\/config/);
+pass("a touch after an update still draws the reminder");
 
 /* --- wiring --------------------------------------------------------------------- */
 
@@ -282,9 +329,12 @@ assert.match(absolute.content[0].text, /Wrote src\/newthing\./);
 assert.match(absolute.content[0].text, /No capsule/);
 const logged = await tools[0].execute("id", { action: "journal", body: "Something happened.", slug: "event" }, undefined, undefined, ctx);
 assert.match(logged.content[0].text, /Logged .*event\.md/);
-const misread = await tools[0].execute("id", { action: "read", path: "src/core/config/deep" }, undefined, undefined, ctx);
-assert.match(misread.content[0].text, /Nearest governing article: src\/core\/config/);
-pass("the tool strips absolute paths to addresses, writes with advice, journals, and teaches on a miss");
+const walked = await tools[0].execute("id", { action: "read", path: "src/core/config/deep" }, undefined, undefined, ctx);
+assert.match(walked.content[0].text, /src\/core\/config governs src\/core\/config\/deep/);
+assert.match(walked.content[0].text, /Current truth about config loading/);
+const misread = await tools[0].execute("id", { action: "read", path: "no/such/thing" }, undefined, undefined, ctx);
+assert.match(misread.content[0].text, /No article governs no\/such\/thing/);
+pass("the tool strips absolute paths to addresses, writes with advice, journals, and read resolves to the governing article");
 
 const dotted = await tools[0].execute(
   "id",
@@ -315,7 +365,7 @@ pass("a quiet session stays quiet");
 assert.equal(commands.length, 1);
 await commands[0].def.handler("", ctx);
 assert.equal(notices.length, 1);
-assert.match(notices[0].msg, /articles, \d+ journal entries; \d+ surfaced this session/);
+assert.match(notices[0].msg, /articles, \d+ journal entries; \d+ seen this session/);
 assert.equal(notices[0].level, "info");
 assert.equal(sent.length, 2);
 pass("the status command notifies the user and tells the model nothing");
@@ -354,5 +404,45 @@ const imported = spawnSync(
 );
 assert.equal(imported.status, 0, imported.stderr);
 pass("the entry point loads under plain node, no jiti");
+
+const lakeDir = join(work, "lake");
+mkdirSync(join(lakeDir, "fundamentals"), { recursive: true });
+writeFileSync(join(lakeDir, "fundamentals/market_cap.csv"), "data\n");
+const lakeTools = [];
+registerPiCanon({ on() {}, registerTool: (t) => lakeTools.push(t), registerCommand() {} }, { mounts: [lakeDir] });
+await lakeTools[0].execute(
+  "id",
+  { action: "write", path: "lake:fundamentals/market_cap", body: "Market cap truths.", capsule: "Free-float market cap, daily." },
+  undefined,
+  undefined,
+  ctx,
+);
+assert.ok(existsSync(join(lakeDir, ".canon/wiki/fundamentals/market_cap.md")));
+const lakeRead = await lakeTools[0].execute(
+  "id",
+  { action: "read", path: join(lakeDir, "fundamentals/market_cap.csv") },
+  undefined,
+  undefined,
+  ctx,
+);
+assert.match(lakeRead.content[0].text, /lake:fundamentals\/market_cap/);
+assert.match(lakeRead.content[0].text, /Market cap truths/);
+pass("a mounted directory carries its own store, addressed by name or absolute path");
+
+const lakeStore = new CanonStore(join(lakeDir, ".canon"));
+const surfLake = new Surfacer([
+  { name: "", dir: projDir, store },
+  { name: "lake", dir: lakeDir, store: lakeStore },
+]);
+surfLake.collect(surfLake.pathsIn({ command: `python etl.py ${join(lakeDir, "fundamentals/market_cap.csv")}` }));
+assert.match(surfLake.flush(), /lake:fundamentals\/market_cap \(updated .*\): Free-float market cap, daily/);
+pass("a mounted asset surfaces under its qualified address");
+
+const entry = await jiti.import(join(projectRoot, "extensions/index.js"));
+const entryTools = [];
+entry.default({ on() {}, registerTool: (t) => entryTools.push(t), registerCommand() {} });
+assert.equal(entryTools[0].name, "pi_canon");
+assert.equal(typeof entry.registerPiCanon, "function");
+pass("the package entry exposes the default and named exports pi loads");
 
 console.log(`\nall ${gates} gates green`);

@@ -1,22 +1,26 @@
 /* pi-canon: canonical project memory for Pi. Wiring only; mechanics live in lib/. */
 
-import { isAbsolute, join } from "node:path";
+import { basename, isAbsolute, join } from "node:path";
 import { CanonStore } from "./lib/store.ts";
-import { SESSION_BUDGET_CHARS, Surfacer } from "./lib/surfacing.ts";
+import { SESSION_BUDGET_CHARS, Surfacer, type Mount } from "./lib/surfacing.ts";
 import { buildCanonTool, type CanonRuntime } from "./lib/tool.ts";
 
 export interface CanonOptions {
-  /* Where the store lives. Default: <project>/.canon */
+  /* Where the project store lives. Default: <project>/.canon */
   root?: string;
   /* Surface governing articles as tool calls touch assets. Default: true. */
   surface?: boolean;
+  /* Directories outside the project that carry their own .canon beside their
+     assets, addressed by basename: mounts: ["/data/lake"] serves lake:prices.
+     Workspaces that mount the same directory share its knowledge. */
+  mounts?: string[];
 }
 
 export function registerPiCanon(pi: any, options: CanonOptions = {}): void {
-  const unknown = Object.keys(options).find((key) => key !== "root" && key !== "surface");
+  const unknown = Object.keys(options).find((key) => key !== "root" && key !== "surface" && key !== "mounts");
   if (unknown) {
     throw new Error(
-      `pi-canon: unknown option "${unknown}". The options are root and surface; everything else is a constant on purpose.`,
+      `pi-canon: unknown option "${unknown}". The options are root, surface, and mounts; everything else is a constant on purpose.`,
     );
   }
   const surface = options.surface !== false;
@@ -32,7 +36,14 @@ export function registerPiCanon(pi: any, options: CanonOptions = {}): void {
           : join(cwd, options.root)
         : join(cwd, ".canon");
       const store = new CanonStore(root);
-      runtime = { store, surfacer: new Surfacer(store, cwd), cwd };
+      const mounts: Mount[] = [
+        { name: "", dir: cwd, store },
+        ...(options.mounts ?? []).map((dir) => {
+          const abs = isAbsolute(dir) ? dir : join(cwd, dir);
+          return { name: basename(abs), dir: abs, store: new CanonStore(join(abs, ".canon")) };
+        }),
+      ];
+      runtime = { store, surfacer: new Surfacer(mounts), cwd, mounts };
     }
     return runtime;
   };
@@ -68,11 +79,12 @@ export function registerPiCanon(pi: any, options: CanonOptions = {}): void {
   pi.registerCommand("pi-canon", {
     description: "pi-canon status: articles, journal entries, surfacing this session",
     handler: async (_args: string, ctx: any) => {
-      const { store, surfacer } = ready(ctx);
+      const { store, surfacer, mounts } = ready(ctx);
       const { surfaced, spent } = surfacer.stats;
+      const mounted = mounts.length > 1 ? `, ${mounts.length - 1} mounted` : "";
       ctx.ui.notify(
-        `pi-canon at ${store.root}: ${store.list().length} articles, ${store.journalCount()} journal ` +
-          `entries; ${surfaced} surfaced this session (${spent} of ${SESSION_BUDGET_CHARS} capsule chars).`,
+        `pi-canon at ${store.root}${mounted}: ${store.list().length} articles, ${store.journalCount()} journal ` +
+          `entries; ${surfaced} seen this session (${spent} of ${SESSION_BUDGET_CHARS} capsule chars).`,
         "info",
       );
     },

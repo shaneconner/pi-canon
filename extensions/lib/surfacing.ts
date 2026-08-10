@@ -5,25 +5,45 @@
    a message per tool call would buy each nudge its own extra LLM call. */
 
 import { existsSync } from "node:fs";
-import { isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import type { CanonStore } from "./store.ts";
 
 export const SESSION_BUDGET_CHARS = 4000;
+const MESSAGE_CHARS = 2000;
 
-const PATHLIKE = /(?:^|\\[nrt]|[\s"'`=:,([{])(\/?[\w.@-]+(?:\/[\w.@-]+)+)/g;
+const PATHLIKE = /(?:^|[\s"'`=:,([{])(\/?[\w.@-]+(?:\/[\w.@-]+)+)/g;
+
+/* A store and the directory whose assets it governs. The project is the first,
+   unnamed mount; named mounts are outside directories (a data lake, a shared
+   corpus) whose articles address as name:path. */
+export interface Mount {
+  name: string;
+  dir: string;
+  store: CanonStore;
+}
 
 export class Surfacer {
-  private store: CanonStore;
-  private cwd: string;
+  private mounts: Mount[];
   private seen = new Set<string>();
-  private updatedPaths = new Set<string>();
-  private touched = new Set<string>();
+  private pendingUpdates = new Set<string>();
   private staged = new Map<string, { capsule: string; stamp: string; asset: string }>();
   private spent = 0;
 
-  constructor(store: CanonStore, cwd: string) {
-    this.store = store;
-    this.cwd = cwd;
+  constructor(mounts: Mount[]) {
+    this.mounts = mounts;
+  }
+
+  private get project(): Mount {
+    return this.mounts[0];
+  }
+
+  private mountFor(asset: string): Mount {
+    const path = asset.replace(/\\/g, "/");
+    const absolute = isAbsolute(path) ? path : join(this.project.dir, path);
+    for (const mount of this.mounts.slice(1)) {
+      if (absolute === mount.dir || absolute.startsWith(`${mount.dir}/`)) return mount;
+    }
+    return this.project;
   }
 
   markSeen(path: string): void {
@@ -33,55 +53,75 @@ export class Surfacer {
 
   markUpdated(path: string): void {
     this.markSeen(path);
-    this.updatedPaths.add(path);
+    this.pendingUpdates.delete(path);
   }
 
   get stats(): { surfaced: number; spent: number } {
     return { surfaced: this.seen.size, spent: this.spent };
   }
 
-  /* Candidate asset paths in a tool call: path shaped tokens that exist on disk.
-     The boundary class includes JSON escapes, so a path opening a line inside a
-     serialized multi-line command still matches. */
+  /* Candidate asset paths in a tool call: string values that are paths, and path
+     shaped tokens inside them. A candidate needs to exist, or to have an existing
+     parent, so a file about to be created still surfaces its governing article. */
   pathsIn(input: unknown): string[] {
-    const text = JSON.stringify(input) ?? "";
     const found = new Set<string>();
-    for (const match of text.matchAll(PATHLIKE)) {
-      const candidate = match[1];
-      const absolute = isAbsolute(candidate) ? candidate : join(this.cwd, candidate);
-      if (existsSync(absolute)) found.add(candidate);
-    }
+    const consider = (candidate: string) => {
+      const path = candidate.replace(/\\/g, "/");
+      const absolute = isAbsolute(path) ? path : join(this.project.dir, path);
+      if (existsSync(absolute) || (path.includes("/") && existsSync(dirname(absolute)))) found.add(path);
+    };
+    const walk = (value: unknown): void => {
+      if (typeof value === "string") {
+        const whole = value.trim();
+        if (whole && whole.length < 512 && !whole.includes("\n")) consider(whole);
+        for (const match of value.matchAll(PATHLIKE)) consider(match[1]);
+      } else if (Array.isArray(value)) {
+        value.forEach(walk);
+      } else if (value && typeof value === "object") {
+        Object.values(value).forEach(walk);
+      }
+    };
+    walk(input);
     return [...found];
   }
 
   /* Stage each newly touched governing article. Nothing is sent or spent here. */
   collect(assets: string[]): void {
     for (const asset of assets) {
-      const article = this.store.resolve(asset, this.cwd);
+      const mount = this.mountFor(asset);
+      const article = mount.store.resolve(asset, mount.dir);
       if (!article) continue;
-      this.touched.add(article.path);
-      if (this.seen.has(article.path) || this.staged.has(article.path)) continue;
+      const key = mount.name ? `${mount.name}:${article.path}` : article.path;
+      this.pendingUpdates.add(key);
+      if (this.seen.has(key) || this.staged.has(key)) continue;
       const stamp = article.updated ? ` (updated ${article.updated})` : "";
-      this.staged.set(article.path, { capsule: article.capsule, stamp, asset });
+      this.staged.set(key, { capsule: article.capsule, stamp, asset });
     }
   }
 
-  /* Everything staged since the last flush, as one message. The budget is charged
-     here, not at staging, so a nudge withdrawn by markSeen costs nothing; articles
-     count as seen only once their line is actually part of a flushed message. */
+  /* Everything staged since the last flush, as one bounded message. The budget is
+     charged here, not at staging, so a nudge withdrawn by markSeen costs nothing;
+     articles count as seen only once their line is part of a flushed message.
+     Overflow stays staged for the next turn. */
   flush(): string | undefined {
     if (!this.staged.size) return undefined;
     const lines: string[] = [];
-    for (const [path, { capsule, stamp, asset }] of this.staged) {
-      if (capsule && this.spent + capsule.length <= SESSION_BUDGET_CHARS) {
-        this.spent += capsule.length;
-        lines.push(`${path}${stamp}: ${capsule}`);
-      } else {
-        lines.push(`${path}${stamp}: article exists. Read it before relying on ${asset}.`);
+    let size = 0;
+    for (const [path, entry] of this.staged) {
+      const useCapsule = entry.capsule && this.spent + entry.capsule.length <= SESSION_BUDGET_CHARS;
+      const line = useCapsule
+        ? `${path}${entry.stamp}: ${entry.capsule}`
+        : `${path}${entry.stamp}: article exists. Read it before relying on ${entry.asset}.`;
+      if (lines.length && size + line.length > MESSAGE_CHARS) {
+        lines.push(`${this.staged.size} more staged; they surface next turn.`);
+        break;
       }
+      if (useCapsule) this.spent += entry.capsule.length;
+      size += line.length;
+      lines.push(line);
       this.seen.add(path);
+      this.staged.delete(path);
     }
-    this.staged.clear();
     const plural = lines.length > 1 ? "s" : "";
     return (
       `[pi-canon] Governing article${plural} for what this turn touches. Read the full article with ` +
@@ -89,10 +129,11 @@ export class Surfacer {
     );
   }
 
-  /* The write-after half of the doctrine: one reminder per batch of touches. */
+  /* The write-after half of the doctrine: every governing article touched since its
+     last update draws one reminder, then the slate clears for the next batch. */
   settleNudge(): string | undefined {
-    const stale = [...this.touched].filter((path) => !this.updatedPaths.has(path));
-    this.touched.clear();
+    const stale = [...this.pendingUpdates];
+    this.pendingUpdates.clear();
     if (!stale.length) return undefined;
     return (
       `[pi-canon] Touched but not updated: ${stale.join(", ")}. If this work changed what is true, ` +

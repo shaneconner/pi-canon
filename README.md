@@ -20,7 +20,7 @@ pi-canon answers both structurally:
       journal/
         2026-08-10-inception.md   immutable, one file per entry
 
-Articles are markdown with three lines of front matter, each with a job:
+Articles are markdown with a few owned lines of front matter, each with a job:
 
     ---
     capsule: Loads layered config; env beats file; secrets never land here.
@@ -45,17 +45,17 @@ One tool, `pi_canon`, four actions:
 |---|---|
 | `read` | the article at an address; a miss points to the nearest governing ancestor |
 | `write` | create or update an article; returns advisory lint, never refuses |
-| `journal` | append an immutable event entry |
+| `journal` | append an event entry; pi_canon never rewrites one |
 | `map` | list articles with their capsules |
 
 ## Options
 
     import piCanon, { registerPiCanon } from "pi-canon"
 
-    piCanon(pi)                              defaults
-    registerPiCanon(pi, { root, surface })   the whole surface
+    piCanon(pi)                                      defaults
+    registerPiCanon(pi, { root, surface, mounts })   the whole surface
 
-Installed as a package, pi loads the default export with defaults; the named export is for an extension file of your own when you want options. `root` is where the store lives (default `<project>/.canon`). `surface: false` disables nudging. Everything else is a constant on purpose.
+Installed as a package, pi loads the default export with defaults; the named export is for an extension file of your own when you want options. `root` is where the project store lives (default `<project>/.canon`). `surface: false` disables nudging. `mounts` lists directories outside the project that carry their own `.canon` beside their assets: `mounts: ["/data/lake"]` serves articles as `lake:prices`, and two workspaces that mount the same directory share its knowledge, because the store lives with the assets it governs. Everything else is a constant on purpose.
 
 ## Install
 
