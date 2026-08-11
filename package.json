@@ -1,15 +1,21 @@
 {
   "name": "pi-canon",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Canonical project memory for the Pi coding agent: one article per asset at a knowable address, an append-only journal beneath it.",
   "type": "module",
   "exports": {
     ".": "./extensions/index.js"
   },
   "pi": {
-    "extensions": ["./extensions"]
+    "extensions": [
+      "./extensions"
+    ]
   },
-  "files": ["extensions", "README.md", "LICENSE"],
+  "files": [
+    "extensions",
+    "README.md",
+    "LICENSE"
+  ],
   "engines": {
     "node": ">=22.18"
   },
@@ -19,7 +25,15 @@
   "scripts": {
     "test": "node tests/verify.mjs"
   },
-  "keywords": ["pi-package", "pi", "pi-extension", "memory", "knowledge", "agent", "wiki"],
+  "keywords": [
+    "pi-package",
+    "pi",
+    "pi-extension",
+    "memory",
+    "knowledge",
+    "agent",
+    "wiki"
+  ],
   "author": "Shane Conner",
   "license": "MIT",
   "repository": {

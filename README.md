@@ -60,8 +60,10 @@ Installed as a package, pi loads the default export with defaults; the named exp
 
 ## Install
 
-    pi install npm:pi-canon    (not yet published)
+    pi install npm:pi-canon
 
 Or clone this repo into `~/.pi/agent/extensions/`. Node 22 or later, Pi 0.83 or later.
 
 MIT. pi-canon is the long-term half of a four-tier memory stack: the journal is the episodic tier, the canon the semantic tier. [pi-fold](https://github.com/shaneconner/pi-fold) is a separate, optional package serving the working tier; the two compose but neither requires the other.
+
+The design and a four-arm multi-session evaluation are written up in *pi-canon: Mutable Canonical Memory over an Immutable Journal, with Recall by Surfacing*, [doi:10.5281/zenodo.21890647](https://doi.org/10.5281/zenodo.21890647). The benchmark is [canon-bench](https://github.com/shaneconner/canon-bench).
