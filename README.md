@@ -64,4 +64,4 @@ Installed as a package, pi loads the default export with defaults; the named exp
 
 Or clone this repo into `~/.pi/agent/extensions/`. Node 22 or later, Pi 0.83 or later.
 
-MIT. pi-canon is the long-term tier of a three-tier memory architecture; [pi-fold](https://github.com/shaneconner/pi-fold) is the episodic tier.
+MIT. pi-canon is the long-term half of a four-tier memory stack: the journal is the episodic tier, the canon the semantic tier. [pi-fold](https://github.com/shaneconner/pi-fold) is a separate, optional package serving the working tier; the two compose but neither requires the other.
