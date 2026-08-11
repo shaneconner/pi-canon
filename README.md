@@ -9,7 +9,7 @@ Agent knowledge bases rot in two ways. Agents cannot tell which article is THE a
 pi-canon answers both structurally:
 
 - The article address IS the asset path. `src/core/config.ts` is governed by `articles/src/core/config.md`; a data lake path like `lake/fundamentals/market_cap` works the same way. One place to look, nothing to search.
-- The journal is a separate, immutable tier. The source goes there as it happened, names and exact numbers included; articles hold only the current best understanding. An article can compress or drift, the journal entry underneath it cannot, so the original is always one hop away.
+- The journal is a separate append-only tier. `pi_canon journal` creates a new entry and never rewrites an existing one, so an article that compresses or drifts does not take the entry underneath it with it. Two things are asked of the agent rather than enforced: recording the source as it arrived, names and exact numbers included, and filing the entry under the right subject, which is what puts it one hop from the article a later session reaches it from. The entries stay ordinary Markdown and any file tool can still edit them.
 
 ## The store
 
@@ -18,7 +18,7 @@ pi-canon answers both structurally:
         src/core/config.md        article governing src/core/config.*
         lake/prices.md            articles are not limited to code
       journal/
-        2026-08-10-inception.md   immutable, one file per entry
+        2026-08-10-inception.md   one file per entry, never rewritten by the tool
 
 Articles are markdown with a few owned lines of front matter, each with a job:
 
@@ -34,7 +34,7 @@ The tree is plain markdown and a valid Obsidian vault; if you think of it as a p
 
 ## Surfacing
 
-Each session opens with one orientation line: how many articles govern the project, or an invitation to write the first one. When a tool call touches an asset whose governing article has not been seen this session, pi-canon stages the capsule; each turn delivers everything staged as one bounded message, once per article per session, under a hard budget (pointers only once it is spent). Resolution walks up: the nearest existing ancestor article governs, so not every file needs an article. After the agent settles, touched but not updated articles draw a single reminder. `/pi-canon` prints a status line: articles, journal entries, and what surfacing has spent this session.
+Each session opens with one orientation line: how many articles govern the project, or an invitation to write the first one. When a tool call touches an asset whose governing article has not been seen this session, pi-canon stages the capsule; the tool call itself sends nothing. Each turn delivers everything staged as one message, once per article per session, because the steering queue drains one message per provider round trip and a message per tool call would buy every nudge its own model call. Reading an article through `pi_canon` withdraws the line staged for it before that message goes out, so pull preempts push; reading the asset itself does not, since reading a file is not reading what is known about it. Capsule bodies share a 4,000 character session allowance, tested per capsule against what is left: a capsule that does not fit is replaced by a pointer saying the article exists and should be read, so a shorter capsule can still land after a longer one was refused. The message header, those pointers, and the settle reminder are outside that counter. Finding a path in a tool call is best effort; resolution, once a path is in hand, is not. It walks up to the nearest existing ancestor article, so not every file needs an article, and it can walk to the top and find nothing. After the agent settles, touched but not updated articles draw a single reminder. `/pi-canon` prints a status line: articles, journal entries, and what surfacing has spent this session.
 
 ## Tool
 
