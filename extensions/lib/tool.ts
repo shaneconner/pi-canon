@@ -30,7 +30,7 @@ function route(runtime: CanonRuntime, raw: string): { mount: Mount; path: string
   return { mount: runtime.mounts[0], path: normalize(raw, runtime.cwd) };
 }
 
-export function buildCanonTool(ready: (ctx: unknown) => CanonRuntime) {
+export function buildCanonTool(ready: (ctx: unknown) => CanonRuntime, retrieval = "none") {
   return {
     name: "pi_canon",
     label: "pi-canon",
@@ -42,7 +42,7 @@ export function buildCanonTool(ready: (ctx: unknown) => CanonRuntime) {
       "journal keeps the original. map lists articles with their capsules. " +
       "Creation is rare: prefer updating the article that already governs. " +
       "File a constraint at the asset it governs, or the shared parent when it spans assets, not " +
-      "the asset you happened to edit; knowledge filed off the asset path never surfaces.",
+      "the asset you happened to edit. " + filingTail(retrieval),
     parameters: {
       type: "object",
       properties: {
@@ -78,6 +78,30 @@ export function buildCanonTool(ready: (ctx: unknown) => CanonRuntime) {
       return { content: [{ type: "text", text }], details: {} };
     },
   };
+}
+
+/* The last clause of the filing rule is configuration dependent, and getting it wrong
+   in either direction costs knowledge. With no retriever an article at an address that
+   governs no asset is genuinely unreachable, so the doctrine must not invite one: the
+   only honest instruction is to keep everything on the asset path. With a retriever
+   that same article is reachable by relevance, and the instruction inverts, because the
+   alternative is filing a constraint that spans unrelated packages at their only shared
+   parent, which is the root, and a root article surfaces on every touch of anything.
+
+   Taken from the caller, which built the retriever, rather than read back off the
+   runtime: the runtime is created from the session's ctx, and forcing it into existence
+   at registration to answer this would pin it to the wrong working directory. */
+function filingTail(retrieval: string): string {
+  if (retrieval === "none") {
+    return "Knowledge filed off the asset path never surfaces.";
+  }
+  return (
+    "A constraint that governs many assets and owns none belongs at its own address, one " +
+    "naming the rule rather than any asset, because the only parent unrelated packages share " +
+    "is the root and a root article surfaces on every touch of anything. Those articles are " +
+    "reached by relevance to the work rather than by address, so give them a capsule that " +
+    "reads like the situation it governs."
+  );
 }
 
 function run(runtime: CanonRuntime, params: Record<string, unknown>): string {

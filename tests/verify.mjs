@@ -887,4 +887,47 @@ surfOffObserve.retrieve();
 assert.match(surfOffObserve.flush(), /policy\/rounding/, "but the query still hears the user");
 pass("resurface switches presence only; the projection is still read for the query");
 
+
+
+/* --- the filing rule tracks the configuration -------------------------------------
+   The last clause costs knowledge in either direction. With no retriever an article
+   off the asset path is genuinely unreachable, so inviting one would be advice to lose
+   information. With a retriever the advice inverts, because the only parent unrelated
+   packages share is the root and a root article surfaces on every touch of anything. */
+const filingTools = [];
+registerPiCanon({ on() {}, registerTool: (t) => filingTools.push(t), registerCommand() {} }, {});
+assert.match(filingTools[0].description, /filed off the asset path never surfaces/);
+assert.doesNotMatch(filingTools[0].description, /governs many assets and owns none/);
+
+registerPiCanon(
+  { on() {}, registerTool: (t) => filingTools.push(t), registerCommand() {} },
+  { retrieval: "lexical" },
+);
+assert.match(filingTools[1].description, /governs many assets and owns none/);
+assert.match(filingTools[1].description, /reached by relevance to the work rather than by address/);
+assert.doesNotMatch(filingTools[1].description, /never surfaces/);
+pass("the filing rule tells the truth for the retrieval the run is actually using");
+
+/* Building the description must not force the runtime into existence: it is created
+   from the session ctx, and answering at registration would pin it to the wrong cwd. */
+const cwdTools = [];
+const cwdSent = [];
+const cwdHandlers = {};
+registerPiCanon(
+  {
+    on: (n, f) => (cwdHandlers[n] ??= []).push(f),
+    registerTool: (t) => cwdTools.push(t),
+    registerCommand() {},
+    sendMessage: (m) => cwdSent.push(m),
+  },
+  { retrieval: "lexical" },
+);
+for (const fn of cwdHandlers.tool_call) fn({ toolName: "read", input: { file_path: "src/feed/sync.ts" } }, ctx);
+for (const fn of cwdHandlers.turn_end) fn(undefined, ctx);
+assert.ok(
+  cwdSent.some((m) => m.content.includes("src/feed/sync")),
+  "the runtime still resolves against the session cwd, not the process cwd",
+);
+pass("the tool description never forces the runtime into existence at registration");
+
 console.log(`\nall ${gates} gates green`);

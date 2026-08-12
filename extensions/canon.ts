@@ -65,7 +65,7 @@ export function registerPiCanon(pi: any, options: CanonOptions = {}): void {
     return runtime;
   };
 
-  pi.registerTool(buildCanonTool(ready));
+  pi.registerTool(buildCanonTool(ready, retriever.name));
 
   /* One orientation line per session, riding the first turn: without it a fresh
      or headless session never hears the doctrine, and the write-after reminder
