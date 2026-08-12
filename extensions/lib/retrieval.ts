@@ -59,12 +59,60 @@ export interface Retriever {
 
 const INTENT_ARGUMENT_KEYS = ["path", "file_path", "pattern", "query", "command", "description"];
 const INTENT_ARGUMENT_CHARS = 200;
+/* How much of the window's user speech counts as the current question. Newest first and
+   bounded rather than the whole window, because the position control is the strongest
+   number either package has on this: same window, oldest half MRR 0.0485 with 4 targets
+   in the top 5, newest half 0.1071 with 10. */
+const USER_INTENT_CHARS = 1500;
 
 export interface IntentTurn {
   role?: unknown;
   content?: unknown;
   toolName?: unknown;
   input?: unknown;
+}
+
+/* Pi carries content as a string or as typed parts; only text parts are speech. */
+function messageText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  const text: string[] = [];
+  for (const part of content) {
+    if (part && typeof part === "object" && (part as Record<string, unknown>).type === "text") {
+      text.push(String((part as Record<string, unknown>).text ?? ""));
+    }
+  }
+  return text.join("\n");
+}
+
+/* The user's own words out of the projection, newest first and bounded.
+
+   This is the best query either finding endorses without qualification: exogenous, so
+   the circularity objection cannot reach it, and a statement of what is wanted rather
+   than evidence of what was found.
+
+   pi-canon's own steered nudges arrive as messages too, and ranking articles against
+   the text of previous article nudges would be a feedback loop that scores an article
+   highly for having been surfaced already. They are excluded by both their customType
+   and their visible prefix, because only one of the two survives every delivery path. */
+export function userIntent(messages: unknown): IntentTurn[] {
+  if (!Array.isArray(messages)) return [];
+  const picked: IntentTurn[] = [];
+  let chars = 0;
+  for (let i = messages.length - 1; i >= 0 && chars < USER_INTENT_CHARS; i -= 1) {
+    const message = messages[i] as Record<string, unknown> | null;
+    if (!message || typeof message !== "object") continue;
+    if (message.role !== "user") continue;
+    if (message.customType === "pi-canon") continue;
+    const text = messageText(message.content).trim();
+    if (!text || text.startsWith("[pi-canon]")) continue;
+    const bounded = text.slice(0, USER_INTENT_CHARS - chars);
+    chars += bounded.length;
+    picked.push({ role: "user", content: bounded });
+  }
+  /* Reversed back to oldest first, so the caller can append this turn's tool calls
+     after them and intentQuery's newest-first walk still reads in true order. */
+  return picked.reverse();
 }
 
 function firstArgument(input: unknown): string {
@@ -89,8 +137,9 @@ export function intentQuery(turns: readonly IntentTurn[]): string {
       pieces.push(argument ? `${String(turn.toolName)} ${argument}` : String(turn.toolName));
       continue;
     }
-    if (turn?.role === "user" && typeof turn.content === "string" && turn.content.trim()) {
-      pieces.push(turn.content.trim());
+    if (turn?.role === "user") {
+      const text = messageText(turn.content).trim();
+      if (text) pieces.push(text);
     }
   }
   return pieces.join("\n");

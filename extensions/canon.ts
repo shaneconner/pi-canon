@@ -60,7 +60,7 @@ export function registerPiCanon(pi: any, options: CanonOptions = {}): void {
           return { name: basename(abs), dir: abs, store: new CanonStore(join(abs, ".canon")) };
         }),
       ];
-      runtime = { store, surfacer: new Surfacer(mounts, retriever), cwd, mounts };
+      runtime = { store, surfacer: new Surfacer(mounts, retriever, resurface), cwd, mounts };
     }
     return runtime;
   };
@@ -90,7 +90,7 @@ export function registerPiCanon(pi: any, options: CanonOptions = {}): void {
      nothing here has to know how it left or who took it. Read only; pi-canon never
      modifies the projection. */
   pi.on("context", (event: any, ctx: any) => {
-    if (!surface || !resurface) return;
+    if (!surface) return;
     ready(ctx).surfacer.observe(event?.messages);
   });
 

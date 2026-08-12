@@ -15,7 +15,7 @@ const jiti = createJiti(import.meta.url);
 const { CanonStore, normalize } = await jiti.import(join(projectRoot, "extensions/lib/store.ts"));
 const { advise, BODY_WARN_CHARS, BODY_LARGE_CHARS, CAPSULE_CHARS } = await jiti.import(join(projectRoot, "extensions/lib/lint.ts"));
 const { Surfacer } = await jiti.import(join(projectRoot, "extensions/lib/surfacing.ts"));
-const { buildRetriever, governsAnAsset, intentQuery, LexicalRetriever, residue } =
+const { buildRetriever, governsAnAsset, intentQuery, LexicalRetriever, residue, userIntent } =
   await jiti.import(join(projectRoot, "extensions/lib/retrieval.ts"));
 const { registerPiCanon } = await jiti.import(join(projectRoot, "extensions/canon.ts"));
 
@@ -824,5 +824,67 @@ surfReindex.noteIntent("read", { file_path: "x" });
 surfReindex.retrieve();
 assert.match(indexedWith, /caps at 1000/, "a same-day rewrite still reindexes");
 pass("the retrieval index never goes stale against a same-session rewrite");
+
+
+
+/* --- the user's own words --------------------------------------------------------
+   The one query source both findings endorse without qualification: exogenous, so the
+   circularity objection cannot reach it, and a statement of what is wanted rather than
+   evidence of what was found. */
+
+assert.deepEqual(
+  userIntent([{ role: "user", content: "why is the ledger total off" }]),
+  [{ role: "user", content: "why is the ledger total off" }],
+);
+assert.deepEqual(
+  userIntent([{ role: "user", content: [{ type: "text", text: "typed parts" }, { type: "image" }] }]),
+  [{ role: "user", content: "typed parts" }],
+);
+assert.deepEqual(userIntent([{ role: "assistant", content: "my own reasoning" }]), []);
+assert.deepEqual(userIntent([{ role: "toolResult", content: "a dump of file contents" }]), []);
+assert.deepEqual(userIntent("not an array"), []);
+pass("user speech is read from the projection, typed parts included, and nothing else is");
+
+/* Our own nudges arrive as messages. Ranking articles against the text of previous
+   article nudges would score an article highly for having been surfaced already. */
+assert.deepEqual(userIntent([{ role: "user", customType: "pi-canon", content: "policy/x: a capsule" }]), []);
+assert.deepEqual(userIntent([{ role: "user", content: "[pi-canon] Governing article for what this turn touches." }]), []);
+pass("pi-canon's own nudges never feed back into the query");
+
+const many = Array.from({ length: 40 }, (_, i) => ({ role: "user", content: `question ${i} `.repeat(20) }));
+const bounded = userIntent(many);
+assert.ok(bounded.length < many.length, "the whole window is not the query");
+assert.ok(bounded.at(-1).content.includes("question 39"), "the newest speech is kept");
+assert.ok(!bounded.some((p) => p.content.includes("question 0")), "the oldest is dropped");
+pass("user speech is bounded and newest-first, per the position control");
+
+/* End to end: a question with no tool call at all still retrieves, which is exactly the
+   turn an unaddressed article is for. */
+const surfSpoken = new Surfacer([{ name: "", dir: projDir, store }], new LexicalRetriever());
+surfSpoken.observe([{ role: "user", content: "should reconciliation totals be rounding half up" }]);
+surfSpoken.retrieve();
+assert.match(surfSpoken.flush(), /policy\/rounding/);
+pass("a question with no tool call still ranks the residue");
+
+/* The tool call leads the question in the query, because it is newer. */
+const surfBoth = new Surfacer([{ name: "", dir: projDir, store }], new LexicalRetriever());
+surfBoth.observe([{ role: "user", content: "check the timezone handling" }]);
+surfBoth.noteIntent("read", { file_path: "ledger/rounding_totals.py" });
+assert.match(
+  intentQuery([{ role: "user", content: "check the timezone handling" }, { toolName: "read", input: { file_path: "a.py" } }]),
+  /^read a\.py\ncheck the timezone/,
+);
+pass("this turn's tool call leads the question that prompted it");
+
+/* resurface governs presence, not observation: with it off the query still sees the
+   user, and nothing expires. */
+const surfOffObserve = new Surfacer([{ name: "", dir: projDir, store }], new LexicalRetriever(), false);
+surfOffObserve.collect([join(projDir, "src/feed/sync.ts")]);
+surfOffObserve.flush();
+surfOffObserve.observe([{ role: "user", content: "reconciliation totals rounding question" }]);
+assert.equal(surfOffObserve.stats.present, 1, "resurface off means nothing expires");
+surfOffObserve.retrieve();
+assert.match(surfOffObserve.flush(), /policy\/rounding/, "but the query still hears the user");
+pass("resurface switches presence only; the projection is still read for the query");
 
 console.log(`\nall ${gates} gates green`);

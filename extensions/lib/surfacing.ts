@@ -12,7 +12,7 @@
 
 import { appendFileSync, existsSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
-import { intentQuery, NONE, residue, type IntentTurn, type Retriever } from "./retrieval.ts";
+import { intentQuery, NONE, residue, userIntent, type IntentTurn, type Retriever } from "./retrieval.ts";
 import type { CanonStore } from "./store.ts";
 
 /* Observability, env-gated and inert otherwise: PI_CANON_TRACE=<file> appends one
@@ -70,17 +70,23 @@ export class Surfacer {
   private pendingUpdates = new Set<string>();
   private staged = new Map<string, { capsule: string; stamp: string; asset: string; score?: number }>();
   private retriever: Retriever;
-  /* This turn's intent, cleared when it flushes: what the agent is doing right now, and
-     nothing older. Recency is structural here rather than a weighting. */
+  private resurface: boolean;
+  /* This turn's tool calls, cleared when it flushes: what the agent is doing right now,
+     and nothing older. Recency is structural here rather than a weighting. */
   private intent: IntentTurn[] = [];
+  /* The user's own words, refreshed from each projection. Kept apart from the tool
+     calls because it has a different lifetime: a question stays the question across the
+     turns spent answering it, while a tool call is spent the moment it flushes. */
+  private spoken: IntentTurn[] = [];
   /* What each currently present article cost the window, kept for the same reason the
      budget was removed: the analysis wants context taken beside relevance. */
   private cost = new Map<string, number>();
   private surfacedEver = new Set<string>();
 
-  constructor(mounts: Mount[], retriever: Retriever = NONE) {
+  constructor(mounts: Mount[], retriever: Retriever = NONE, resurface = true) {
     this.mounts = mounts;
     this.retriever = retriever;
+    this.resurface = resurface;
   }
 
   private get project(): Mount {
@@ -129,6 +135,11 @@ export class Surfacer {
     } catch {
       return; /* an unserializable projection is no evidence of absence */
     }
+    /* Read before the expiry check and independently of it: the projection is the only
+       place the user's own words are visible, and a run with resurface off still wants
+       them for the query. Presence is what the switch governs, not observation. */
+    this.spoken = userIntent(messages);
+    if (!this.resurface) return;
     for (const path of [...this.seen]) {
       const mark = this.marks.get(path);
       if (!mark || projection.includes(mark)) continue;
@@ -198,7 +209,11 @@ export class Surfacer {
      The project store only. A mount is somebody else's directory and its residue is
      their business, and the spine already serves mounted assets by address. */
   retrieve(): void {
-    if (this.retriever === NONE || !this.intent.length) return;
+    if (this.retriever === NONE) return;
+    /* Oldest first, so intentQuery's newest-first walk reads in true order: this turn's
+       tool calls lead, the question that prompted them follows. */
+    const turns = [...this.spoken, ...this.intent];
+    if (!turns.length) return;
     const { store, dir } = this.project;
     const candidates = residue(store, dir);
     if (!candidates.length) return;
@@ -208,7 +223,7 @@ export class Surfacer {
        run. The residue is small by construction, being only what no address reaches, so
        the honest rebuild costs less than the bug the cache would hide. */
     this.retriever.index?.(candidates);
-    const query = intentQuery(this.intent);
+    const query = intentQuery(turns);
     if (!query.trim()) return;
     let scores: Map<string, number>;
     try {
