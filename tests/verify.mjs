@@ -930,4 +930,51 @@ assert.ok(
 );
 pass("the tool description never forces the runtime into existence at registration");
 
+
+
+/* --- the scope question ----------------------------------------------------------
+   Filing a constraint at the asset you happened to be editing is the addressing
+   version of the paraphrase failure: the rule survives in full, at an address nothing
+   else resolves to. Observed on the first cell of the 06 smoke run, where the plant
+   filed a house-wide actor convention at ops/billing. */
+const scopeDir = join(work, "scope");
+mkdirSync(join(scopeDir, "ops"), { recursive: true });
+writeFileSync(join(scopeDir, "ops/billing.py"), "# emitter\n");
+const scopeStore = new CanonStore(join(scopeDir, ".canon"));
+const RULE_BODY = "Scheduled jobs must write the actor with a system: prefix.";
+
+const asked = advise(
+  scopeStore.write("ops/billing", { capsule: "c", body: RULE_BODY }),
+  scopeStore, "", { dir: scopeDir, retrieval: "lexical" },
+);
+assert.ok(asked.some((a) => a.includes("governs an asset") && a.includes("its own address")));
+pass("a rule filed at an asset address draws the scope question");
+
+/* Silent with no retriever: an off-path article is unreachable then, so the advice
+   would be advice to lose information. */
+assert.equal(
+  advise(scopeStore.read("ops/billing"), scopeStore, "", { dir: scopeDir, retrieval: "none" })
+    .filter((a) => a.includes("its own address")).length,
+  0,
+);
+assert.equal(advise(scopeStore.read("ops/billing"), scopeStore, "").length, 0);
+pass("the scope question stays silent when nothing could reach an off-path article");
+
+/* Once, on the write that turns an article into one carrying a rule. A store being
+   maintained does not get asked the same question every turn. */
+assert.equal(
+  advise(scopeStore.read("ops/billing"), scopeStore, RULE_BODY, { dir: scopeDir, retrieval: "lexical" })
+    .filter((a) => a.includes("its own address")).length,
+  0,
+  "a rewrite of an article that already carried a rule stays quiet",
+);
+/* And never for an article that is already off the asset path: it is where it belongs. */
+const offPath = scopeStore.write("policy/audit-actor", { capsule: "c", body: RULE_BODY });
+assert.equal(
+  advise(offPath, scopeStore, "", { dir: scopeDir, retrieval: "lexical" })
+    .filter((a) => a.includes("its own address")).length,
+  0,
+);
+pass("the scope question is asked once, and never of an article already off the asset path");
+
 console.log(`\nall ${gates} gates green`);

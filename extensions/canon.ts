@@ -60,7 +60,7 @@ export function registerPiCanon(pi: any, options: CanonOptions = {}): void {
           return { name: basename(abs), dir: abs, store: new CanonStore(join(abs, ".canon")) };
         }),
       ];
-      runtime = { store, surfacer: new Surfacer(mounts, retriever, resurface), cwd, mounts };
+      runtime = { store, surfacer: new Surfacer(mounts, retriever, resurface), cwd, mounts, retrieval: retriever.name };
     }
     return runtime;
   };

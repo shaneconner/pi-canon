@@ -1,6 +1,7 @@
 /* Advisory only: advice strings, never a refusal. A blocked write teaches an agent
    to stop writing; a warning teaches it what to do next. */
 
+import { governsAnAsset } from "./retrieval.ts";
 import { normalize, type Article, type CanonStore } from "./store.ts";
 
 export const BODY_WARN_CHARS = 8000;
@@ -13,7 +14,21 @@ const EVENTISH = /^(added|updated|fixed|changed|implemented|removed|refactored|r
 
 const CONSTRAINT = /\b(must|never|always|require[sd]?|do not|don't)\b/i;
 
-export function advise(article: Article, store: CanonStore, priorBody?: string): string[] {
+/* Where the article sits relative to the tree, and whether anything can reach an
+   article that sits off it. Absent means do not raise the scope question at all: with no
+   retriever an off-path article is unreachable, so the advice would be advice to lose
+   information. */
+export interface Reach {
+  dir: string;
+  retrieval: string;
+}
+
+export function advise(
+  article: Article,
+  store: CanonStore,
+  priorBody?: string,
+  reach?: Reach,
+): string[] {
   const advice: string[] = [];
   const size = article.body.length;
 
@@ -33,6 +48,29 @@ export function advise(article: Article, store: CanonStore, priorBody?: string):
           "if it genuinely changed, journal what changed it.",
       );
     }
+  }
+
+  /* The scope question, asked once per article at the moment it first becomes a rule.
+     Filing a constraint at the asset you happened to be editing is the addressing
+     version of the paraphrase failure: the rule survives, in full, at an address
+     nothing else resolves to. A run-2 miss lost "docs claim 1000" by wording; this
+     loses a house rule by placement, and neither is visible to the agent that did it.
+
+     Not a classifier. Nothing here can tell a rule about this asset from a rule about
+     every asset, and guessing wrong in the quiet direction is the expensive way to be
+     wrong. So it asks rather than decides, and it asks only on the write that turns an
+     article into one carrying a rule, so a store being maintained stays quiet. */
+  if (
+    reach && reach.retrieval !== "none" &&
+    CONSTRAINT.test(article.body) && !CONSTRAINT.test(priorBody ?? "") &&
+    governsAnAsset(reach.dir, article.path)
+  ) {
+    advice.push(
+      `This article now carries a rule, and it lives at ${article.path}, which governs an asset. ` +
+        `Anything working on a different asset resolves to its own article and never reaches this one. ` +
+        `If the rule holds beyond ${article.path}, give it its own address naming the rule instead, ` +
+        "where relevance to the work can find it.",
+    );
   }
 
   if (size > BODY_LARGE_CHARS) {

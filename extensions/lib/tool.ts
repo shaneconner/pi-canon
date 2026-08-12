@@ -11,6 +11,7 @@ export interface CanonRuntime {
   surfacer: Surfacer;
   cwd: string;
   mounts: Mount[];
+  retrieval: string;
 }
 
 /* A path routes to the mount it names (lake:prices), the mount whose directory
@@ -145,7 +146,10 @@ function run(runtime: CanonRuntime, params: Record<string, unknown>): string {
         body: params.body ? String(params.body) : undefined,
       });
       surfacer.markUpdated(qualify(article.path));
-      return [`Wrote ${qualify(article.path)}.`, ...advise(article, store, priorBody)].join("\n");
+      return [
+        `Wrote ${qualify(article.path)}.`,
+        ...advise(article, store, priorBody, { dir: mount.dir, retrieval: runtime.retrieval }),
+      ].join("\n");
     }
     case "journal": {
       const body = typeof params.body === "string" ? params.body.trim() : "";
