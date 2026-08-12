@@ -82,7 +82,7 @@ pi-canon is an increment on the pattern rather than a replacement for it, and it
 
 **A spine**, the addressing convention. An article's address is computed from the asset instead of searched for, and nothing has to be configured for that mapping to hold, which makes the spine a convention rather than a mode. It is also why no part of the package searches: there is nothing to find when the path already decided the address.
 
-**Surfacing**, push rather than pull. When a tool call is detected touching a governed asset, that article's capsule is staged for the session, at most once per article and under a session allowance, so nobody has to think to ask. Detection of a path inside a tool call is best effort. Resolution, once a path is in hand, is not.
+**Surfacing**, push rather than pull. When a tool call is detected touching a governed asset, that article's capsule is staged for the session, at most once per article, so nobody has to think to ask. Detection of a path inside a tool call is best effort. Resolution, once a path is in hand, is not.
 
 The evaluation below does not test that lineage argument: no evaluated arm is a search-driven LLM wiki, so nothing here shows pi-canon beats a disciplined one.
 
@@ -119,13 +119,13 @@ One lint line is different in kind. When a write supplies a body and an article 
 
 A tool call stages the governing article for whatever it touched and sends nothing. Each turn end flushes everything staged as a single message, because pi's steering queue drains one message per provider round trip and a message per tool call would buy every nudge its own model call. An article surfaces at most once per session, and nothing about that persists: a new session re-surfaces everything.
 
-Three numbers, all constants in the code. A capsule is written to fit 1,000 characters, a flushed message aims at 2,000, and capsule text has a 4,000 character session allowance. The message target is not a cap, because the first line always goes out whole, and anything that does not fit stays staged, so the message ends with a count of what is still waiting and those lines go out on a later turn. Only the session allowance is a refusal, and it is tested per capsule against what is left, so a short capsule can still land after a longer one was turned away. Past the allowance an article does not disappear: it surfaces as a pointer naming the address and telling the agent to read it. Pointers, message headers, and reminders sit outside the counter.
+No character count decides any of this. A capsule is written to fit 1,000 characters, and that is a target handed to the agent at write time, not a gate at read time: an article whose governing asset a turn touched surfaces whole or does not surface. Earlier versions charged capsule text against a session allowance and degraded the overflow to bare pointers. That allowance was removed in 2.0. It was a constant guessing at a policy nobody had measured, and what it decided was how much an agent got to see. What stands in its place is measurement: every surfaced line records what it cost the window, so context taken can be read against relevance afterwards instead of a constant ruling on it in advance. The one remaining reason a line is not capsule text is an article that has no capsule, which surfaces as a pointer naming the address and telling the agent to read it.
 
 Reading an article through `pi_canon` withdraws the line staged for it before the message goes out, so pull preempts push. Reading the asset file itself does not, because reading a file is not reading what is known about it, and the capsule may hold exactly the constraint the file does not contain. After the agent settles, articles touched but not updated draw one reminder naming them, once per batch, re-armed by the next touch.
 
 Finding a path in a tool call is best effort. Only the input of a tool call is scanned. Results are never scanned, and neither is the model's prose. Inputs are scanned for whole short strings and path-shaped tokens that exist on disk or whose parent directory does, so a file about to be created still surfaces its governing ancestor, and a path with a space inside a longer string is missed. What that feeds, resolution from a path to a governing article, is deterministic. The two claims stay separate on purpose.
 
-`/pi-canon` prints one status line: store root, the mount count when there is one, article count, journal entries, articles seen this session, and capsule characters spent against 4,000. It goes to the UI and sends the model nothing, so asking costs no context. `PI_CANON_TRACE=<file>` appends one JSON line per surfacing decision, and is inert when the variable is unset.
+`/pi-canon` prints one status line: store root, the mount count when there is one, article count, journal entries, articles surfaced this session, and how many of those are still in context and what they occupy. It goes to the UI and sends the model nothing, so asking costs no context. `PI_CANON_TRACE=<file>` appends one JSON line per surfacing decision, and is inert when the variable is unset.
 
 ## Options
 
@@ -140,10 +140,12 @@ export default function (pi) {
 }
 ```
 
-Three keys, and any other throws at registration by name, because everything else is a constant on purpose.
+Five keys, and any other throws at registration by name, because everything else is a constant on purpose.
 
 - **`root`** places the store. Absolute is used as given, relative joins the project cwd. Default `<project>/.canon`.
 - **`surface: false`** silences the orientation line, the per-turn flush, and the settle reminder. The `pi_canon` tool and `/pi-canon` stay registered and working.
+- **`resurface: false`** returns an article to surfacing at most once per session however long ago it left the window. The default is `true`: an article counts as seen only while it is still in the context the provider receives, so one folded or compacted away surfaces again the next time its asset is touched. A fresh touch is what brings it back, so nothing re-surfaces on its own.
+- **`retrieval`** ranks the articles that govern no asset, the one category the address spine can never reach, against what the agent is doing. The default is `"none"`, which ranks nothing and surfaces nothing unaddressed: the spine alone, exactly as 1.0. `"lexical"` is BM25 over the standard library, no dependency and no model. Anything that needs a model is supplied here as `{ name, score, index? }`, so this package never carries one and never decides which you run. A retriever returns scores; there is no relevance threshold, because where a cutoff belongs is a question for the data and every surfaced line records its score beside what it cost. A retriever that throws costs the turn its ranking and nothing else.
 - **`mounts`** lists directories outside the project that carry their own `.canon` beside their assets. `mounts: ["/data/lake"]` serves articles as `lake:prices`, addressable by that name or by any absolute path inside the mount. Two workspaces that mount the same directory read and write the same store, because the store lives with the assets it governs and sharing needs no protocol. A mount has no journal of its own: events are project history and every entry lands in the project store.
 
 ## What the code holds, and what it asks for
@@ -154,7 +156,8 @@ Held by the runtime:
 
 - A journal entry is created with the exclusive-create flag, so pi_canon never rewrites or deletes one, and a name collision increments a suffix rather than losing an entry. The files stay ordinary Markdown, so any other tool can still rewrite or delete one: append-only is a property of the tool, not of the filesystem.
 - Once a path is in hand it resolves to exactly one article, walking to the nearest ancestor that has one, or to nothing at all.
-- An article surfaces at most once per session, with capsule text bounded at 4,000 characters for the session.
+- An article surfaces whole, with no character count able to truncate it or hold it back.
+- An article surfaces at most once while it is present in the context the provider receives. Presence is read from that projection rather than remembered, so folding or compaction returns the article to surfacing; a harness that reports no projection degrades to at most once per session.
 - Reading an article through the tool withdraws its staged capsule before the message goes out.
 
 Asked of the agent, and checked by nothing:
@@ -169,14 +172,15 @@ Nothing in the package can compel an agent to keep a line it has decided to cut.
 
 What the package does not do, stated so nothing above reads as more than it is:
 
-- No search. There is no query action, no index, and no grep. `map` is the only listing, and retrieval is by exact address or by the ancestor walk.
-- No embeddings, no similarity, no ranking.
+- No search the agent can call. There is no query action and no grep. `map` is the only listing, and an asset resolves to its article by exact address or by the ancestor walk, never by ranking.
+- No embeddings and no model. `retrieval: "lexical"` builds a BM25 index over the articles that govern no asset, and nothing else is ranked ever; any other ranker is a function the caller supplies.
 - No filesystem watching, and no staleness detection: `updated` is the date of the last write and is never compared against the asset.
 - No delete and no rename. Removing or moving an article is a file operation you perform.
 - Articles are last write wins, with no lock, no merge, and no warning that someone else changed the file. Only journal entries get the collision retry.
 - No duplicate detection. One canonical address per asset is structural, not checked.
 - Nothing writes, summarizes, or compacts on its own, and nothing filters what goes in: no secrets scanning and no redaction. Every line pi-canon wrote came from an explicit tool call.
-- Nothing about surfacing persists between sessions. A new session re-surfaces everything and gets a fresh allowance.
+- Nothing about surfacing persists between sessions. A new session re-surfaces everything.
+- Presence is tested by looking for the article's capsule in the projection, so a capsule too short to be distinctive is never expired, and a digest that does not carry the capsule counts as absent.
 
 ## Evidence
 

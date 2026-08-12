@@ -1,8 +1,9 @@
 /* pi-canon: canonical project memory for Pi. Wiring only; mechanics live in lib/. */
 
 import { basename, isAbsolute, join } from "node:path";
+import { buildRetriever, type RetrievalOption } from "./lib/retrieval.ts";
 import { CanonStore } from "./lib/store.ts";
-import { SESSION_BUDGET_CHARS, Surfacer, type Mount } from "./lib/surfacing.ts";
+import { Surfacer, type Mount } from "./lib/surfacing.ts";
 import { buildCanonTool, type CanonRuntime } from "./lib/tool.ts";
 
 export interface CanonOptions {
@@ -10,20 +11,36 @@ export interface CanonOptions {
   root?: string;
   /* Surface governing articles as tool calls touch assets. Default: true. */
   surface?: boolean;
+  /* Treat an article as seen only while it is still in the live context window, so one
+     folded or compacted away surfaces again the next time its asset is touched.
+     Default: true. Set false for 1.0 behavior, where a surfaced article is never
+     surfaced again however long ago it left the window. */
+  resurface?: boolean;
   /* Directories outside the project that carry their own .canon beside their
      assets, addressed by basename: mounts: ["/data/lake"] serves lake:prices.
      Workspaces that mount the same directory share its knowledge. */
   mounts?: string[];
+  /* How articles that govern no asset are ranked against what the agent is doing, the
+     one category the address spine can never reach. "none" is the default and is the
+     1.0 behavior exactly: nothing is ranked and nothing unaddressed ever surfaces.
+     "lexical" is BM25 over the standard library. Anything needing a model is supplied
+     here as { name, score, index? }, so this package never depends on one. */
+  retrieval?: RetrievalOption;
 }
 
 export function registerPiCanon(pi: any, options: CanonOptions = {}): void {
-  const unknown = Object.keys(options).find((key) => key !== "root" && key !== "surface" && key !== "mounts");
+  const known = new Set(["root", "surface", "mounts", "resurface", "retrieval"]);
+  const unknown = Object.keys(options).find((key) => !known.has(key));
   if (unknown) {
     throw new Error(
-      `pi-canon: unknown option "${unknown}". The options are root, surface, and mounts; everything else is a constant on purpose.`,
+      `pi-canon: unknown option "${unknown}". The options are root, surface, mounts, resurface, and retrieval; everything else is a constant on purpose.`,
     );
   }
   const surface = options.surface !== false;
+  const resurface = options.resurface !== false;
+  /* Built here rather than at first use, so a bad retrieval option throws at
+     registration beside the unknown-option check instead of mid-session. */
+  const retriever = buildRetriever(options.retrieval);
 
   let runtime: CanonRuntime | undefined;
 
@@ -43,7 +60,7 @@ export function registerPiCanon(pi: any, options: CanonOptions = {}): void {
           return { name: basename(abs), dir: abs, store: new CanonStore(join(abs, ".canon")) };
         }),
       ];
-      runtime = { store, surfacer: new Surfacer(mounts), cwd, mounts };
+      runtime = { store, surfacer: new Surfacer(mounts, retriever), cwd, mounts };
     }
     return runtime;
   };
@@ -68,17 +85,29 @@ export function registerPiCanon(pi: any, options: CanonOptions = {}): void {
     deliver(pi, text, "nextTurn");
   });
 
+  /* The window the provider is about to receive, which is the only definition of what
+     the agent can see: folded and compacted material is already gone from it, so
+     nothing here has to know how it left or who took it. Read only; pi-canon never
+     modifies the projection. */
+  pi.on("context", (event: any, ctx: any) => {
+    if (!surface || !resurface) return;
+    ready(ctx).surfacer.observe(event?.messages);
+  });
+
   /* Touches stage; turns flush. One steered message per turn rides the provider
      round trip that was happening anyway. */
   pi.on("tool_call", (event: any, ctx: any) => {
     if (!surface || event?.toolName === "pi_canon") return;
     const { surfacer } = ready(ctx);
     surfacer.collect(surfacer.pathsIn(event?.input));
+    surfacer.noteIntent(event?.toolName, event?.input);
   });
 
   pi.on("turn_end", (_event: unknown, ctx: any) => {
     if (!surface) return;
-    const text = ready(ctx).surfacer.flush();
+    const { surfacer } = ready(ctx);
+    surfacer.retrieve();
+    const text = surfacer.flush();
     if (text) deliver(pi, text, "steer");
   });
 
@@ -93,11 +122,11 @@ export function registerPiCanon(pi: any, options: CanonOptions = {}): void {
     description: "pi-canon status: articles, journal entries, surfacing this session",
     handler: async (_args: string, ctx: any) => {
       const { store, surfacer, mounts } = ready(ctx);
-      const { surfaced, spent } = surfacer.stats;
+      const { surfaced, present, chars } = surfacer.stats;
       const mounted = mounts.length > 1 ? `, ${mounts.length - 1} mounted` : "";
       ctx.ui.notify(
         `pi-canon at ${store.root}${mounted}: ${store.list().length} articles, ${store.journalCount()} journal ` +
-          `entries; ${surfaced} seen this session (${spent} of ${SESSION_BUDGET_CHARS} capsule chars).`,
+          `entries; ${surfaced} surfaced this session, ${present} still in context taking ${chars} chars.`,
         "info",
       );
     },

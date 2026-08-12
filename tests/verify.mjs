@@ -14,7 +14,9 @@ const jiti = createJiti(import.meta.url);
 
 const { CanonStore, normalize } = await jiti.import(join(projectRoot, "extensions/lib/store.ts"));
 const { advise, BODY_WARN_CHARS, BODY_LARGE_CHARS, CAPSULE_CHARS } = await jiti.import(join(projectRoot, "extensions/lib/lint.ts"));
-const { Surfacer, SESSION_BUDGET_CHARS } = await jiti.import(join(projectRoot, "extensions/lib/surfacing.ts"));
+const { Surfacer } = await jiti.import(join(projectRoot, "extensions/lib/surfacing.ts"));
+const { buildRetriever, governsAnAsset, intentQuery, LexicalRetriever, residue } =
+  await jiti.import(join(projectRoot, "extensions/lib/retrieval.ts"));
 const { registerPiCanon } = await jiti.import(join(projectRoot, "extensions/canon.ts"));
 
 let gates = 0;
@@ -203,13 +205,42 @@ assert.match(batched, /src\/wikilinked/);
 assert.equal(batched.match(/\[pi-canon\]/g).length, 1);
 pass("staged touches coalesce into one flushed message");
 
-const surfBudget = new Surfacer([{ name: "", dir: projDir, store }]);
-store.write("src/core/other", { capsule: "c".repeat(SESSION_BUDGET_CHARS), body: "b" });
-surfBudget.collect([join(projDir, "src/core/other.ts")]);
-surfBudget.collect([join(projDir, "src/core/config.ts")]);
-assert.match(surfBudget.flush(), /1 more staged; they surface next turn/);
-assert.match(surfBudget.flush(), /article exists\. Read it/);
-pass("a flush is bounded, overflow carries to the next turn, and a spent budget degrades capsules to pointers");
+/* 2.0 deleted the session budget: no character count decides what an agent sees, so a
+   long capsule surfaces whole, in the same flush, alongside every other staged article,
+   and nothing is ever held back to a later turn. */
+const surfUnbounded = new Surfacer([{ name: "", dir: projDir, store }]);
+const longCapsule = "c".repeat(8000);
+store.write("src/core/other", { capsule: longCapsule, body: "b" });
+surfUnbounded.collect([join(projDir, "src/core/other.ts")]);
+surfUnbounded.collect([join(projDir, "src/core/config.ts")]);
+const unbounded = surfUnbounded.flush();
+assert.ok(unbounded.includes(longCapsule), "a long capsule surfaces whole, never truncated");
+assert.match(unbounded, /src\/core\/config/);
+assert.doesNotMatch(unbounded, /more staged/);
+assert.doesNotMatch(unbounded, /article exists\. Read it/);
+assert.equal(surfUnbounded.flush(), undefined, "nothing is held back for a later turn");
+pass("no character count gates surfacing: every staged article surfaces whole in one flush");
+
+/* The budget is gone as an option name too, so a caller carrying one gets told. */
+assert.throws(
+  () => registerPiCanon({ on() {}, registerTool() {}, registerCommand() {} }, { budget: 4000 }),
+  /unknown option "budget"/,
+);
+pass("the deleted budget is not a silently ignored option");
+
+/* Cost is recorded instead of charged: what surfacing took from the window is
+   readable per article, which is what the budget constant used to decide in advance. */
+const surfCost = new Surfacer([{ name: "", dir: projDir, store }]);
+assert.equal(surfCost.stats.chars, 0);
+surfCost.collect([join(projDir, "src/core/config.ts")]);
+const costed = surfCost.flush();
+assert.ok(surfCost.stats.chars > 0, "a surfaced article records what it cost");
+assert.ok(
+  surfCost.stats.chars < costed.length,
+  "cost is the article's own line, not the whole framed message",
+);
+assert.equal(surfCost.stats.surfaced, 1);
+pass("surfacing records context taken per article rather than spending an allowance");
 
 store.write("src/core", { capsule: "Core module truths.", body: "b" });
 const surfNew = new Surfacer([{ name: "", dir: projDir, store }]);
@@ -230,8 +261,207 @@ const surfSeen = new Surfacer([{ name: "", dir: projDir, store }]);
 surfSeen.collect([join(projDir, "src/core/config.ts")]);
 surfSeen.markSeen("src/core/config");
 assert.equal(surfSeen.flush(), undefined);
-assert.equal(surfSeen.stats.spent, 0);
-pass("reading an article withdraws its staged nudge and spends no budget");
+assert.equal(surfSeen.stats.chars, 0);
+pass("reading an article withdraws its staged nudge and costs no context");
+
+/* --- presence -------------------------------------------------------------------
+   Seen means "the agent can see it", not "we sent it once". The projection is the
+   only witness: what folded or compacted away is already absent from it. */
+
+const CAPSULE_PRESENT = "Vendor feed pages at 1000 despite the docs; never widen the batch.";
+mkdirSync(join(projDir, "src/feed"), { recursive: true });
+writeFileSync(join(projDir, "src/feed/sync.ts"), "export const s = 1;\n");
+store.write("src/feed/sync", { capsule: CAPSULE_PRESENT, body: "b" });
+
+const surfPresent = new Surfacer([{ name: "", dir: projDir, store }]);
+surfPresent.collect([join(projDir, "src/feed/sync.ts")]);
+const presentLine = surfPresent.flush();
+assert.equal(surfPresent.stats.present, 1);
+assert.equal(surfPresent.stats.surfaced, 1);
+
+/* Still in the window: staged again, withheld again. */
+surfPresent.observe([{ role: "user", content: `earlier turn\n${presentLine}\nlater turn` }]);
+assert.equal(surfPresent.stats.present, 1);
+surfPresent.collect([join(projDir, "src/feed/sync.ts")]);
+assert.equal(surfPresent.flush(), undefined);
+pass("an article still in the projection does not surface a second time");
+
+/* Folded away: the mark is gone, so the next touch surfaces it again. */
+surfPresent.observe([{ role: "user", content: "the turn that carried it was folded to a digest" }]);
+assert.equal(surfPresent.stats.present, 0, "an absent article stops counting as present");
+assert.equal(surfPresent.stats.surfaced, 1, "but it is still counted as surfaced this session");
+assert.equal(surfPresent.stats.chars, 0, "and stops occupying context");
+surfPresent.collect([join(projDir, "src/feed/sync.ts")]);
+assert.match(surfPresent.flush(), /src\/feed\/sync/);
+pass("an article folded out of the projection re-surfaces on the next touch");
+
+/* A touch is what re-surfaces it. Absence alone never pushes anything. */
+const surfQuiet = new Surfacer([{ name: "", dir: projDir, store }]);
+surfQuiet.collect([join(projDir, "src/feed/sync.ts")]);
+surfQuiet.flush();
+surfQuiet.observe([{ role: "user", content: "nothing of ours survived here" }]);
+assert.equal(surfQuiet.flush(), undefined);
+pass("departure alone never surfaces anything; only a fresh touch does");
+
+/* Reading through the tool marks presence off the same string the result prints. */
+const surfRead = new Surfacer([{ name: "", dir: projDir, store }]);
+surfRead.collect([join(projDir, "src/feed/sync.ts")]);
+surfRead.markSeen("src/feed/sync", CAPSULE_PRESENT);
+assert.equal(surfRead.flush(), undefined);
+surfRead.observe([{ role: "toolResult", content: `capsule: ${CAPSULE_PRESENT}\n\nbody` }]);
+surfRead.collect([join(projDir, "src/feed/sync.ts")]);
+assert.equal(surfRead.flush(), undefined, "a read article is present while its result is live");
+surfRead.observe([{ role: "user", content: "that result got folded" }]);
+surfRead.collect([join(projDir, "src/feed/sync.ts")]);
+assert.match(surfRead.flush(), /src\/feed\/sync/, "and re-surfaces once the result is gone");
+pass("a pi_canon read establishes presence and expires with its own tool result");
+
+/* Never observing is exactly 1.0: nothing expires, so a harness with no projection
+   loses the mechanism and nothing else. Neither is a non-array or unserializable one
+   evidence of absence. */
+const surfBlind = new Surfacer([{ name: "", dir: projDir, store }]);
+surfBlind.collect([join(projDir, "src/feed/sync.ts")]);
+surfBlind.flush();
+surfBlind.observe(undefined);
+surfBlind.observe("not an array");
+const cyclic = [{ role: "user" }];
+cyclic[0].self = cyclic;
+surfBlind.observe(cyclic);
+assert.equal(surfBlind.stats.present, 1);
+surfBlind.collect([join(projDir, "src/feed/sync.ts")]);
+assert.equal(surfBlind.flush(), undefined);
+pass("no usable projection degrades to 1.0 behavior rather than expiring blind");
+
+/* A capsule too short to be distinctive is never expired: a missed re-surface costs
+   one nudge that does not happen, a false expiry spams the window every turn. */
+store.write("src/core/terse", { capsule: "Cache.", body: "b" });
+writeFileSync(join(projDir, "src/core/terse.ts"), "export const z = 3;\n");
+const surfTerse = new Surfacer([{ name: "", dir: projDir, store }]);
+surfTerse.collect([join(projDir, "src/core/terse.ts")]);
+surfTerse.flush();
+surfTerse.observe([{ role: "user", content: "unrelated" }]);
+assert.equal(surfTerse.stats.present, 1);
+pass("a capsule too short to test is never expired");
+
+/* --- retrieval ------------------------------------------------------------------
+   The residue is what the spine can never reach: articles at addresses that govern no
+   asset on disk. Everything else is answered by address, for free, and must not be
+   ranked, or retrieval would compete with the address instead of completing it. */
+
+store.write("policy/rounding", {
+  capsule: "Ledger totals round half to even; never round half up in reconciliation.",
+  body: "Decided after a vendor reconciliation mismatch. Applies wherever money is summed.",
+});
+store.write("policy/timezones", {
+  capsule: "Every stored timestamp is UTC; display converts, storage never does.",
+  body: "A local timestamp in the lake is a bug regardless of which service wrote it.",
+});
+
+const free = residue(store, projDir).map((c) => c.path);
+assert.ok(free.includes("policy/rounding"), "an article governing no asset is residue");
+assert.ok(!free.includes("src/core/config"), "an article governing a real file is not");
+assert.ok(!free.includes("src/feed/sync"), "extension-dropped addresses still match their asset");
+pass("the residue is exactly the articles no asset address can reach");
+
+assert.equal(governsAnAsset(projDir, "src/core/config"), true);
+assert.equal(governsAnAsset(projDir, "src/core"), true, "a directory is an asset");
+assert.equal(governsAnAsset(projDir, "policy/rounding"), false);
+assert.equal(governsAnAsset(projDir, "src/core/config.test"), false, "a longer stem is not a match");
+pass("an address governs an asset only when something on disk normalizes back to it");
+
+/* none is the control: 1.0 exactly, nothing unaddressed ever surfaces. */
+const surfNone = new Surfacer([{ name: "", dir: projDir, store }]);
+surfNone.noteIntent("read", { file_path: "ledger/reconcile.py" });
+surfNone.retrieve();
+assert.equal(surfNone.flush(), undefined);
+pass("retrieval none never surfaces an unaddressed article");
+
+/* lexical ranks the residue against this turn's intent. */
+const surfLex = new Surfacer([{ name: "", dir: projDir, store }], new LexicalRetriever());
+surfLex.noteIntent("shell", { command: "python reconciliation totals rounding check" });
+surfLex.retrieve();
+const lexical = surfLex.flush();
+assert.match(lexical, /policy\/rounding/, "the article the query touches surfaces");
+assert.doesNotMatch(lexical, /policy\/timezones/, "one it does not touch stays put");
+pass("lexical retrieval surfaces an unaddressed article the intent reaches");
+
+/* Ranked lines never displace an addressed one: the address is certain, the score is a
+   guess, so the certainty leads the message. */
+const surfRank = new Surfacer([{ name: "", dir: projDir, store }], new LexicalRetriever());
+surfRank.collect([join(projDir, "src/feed/sync.ts")]);
+surfRank.noteIntent("shell", { command: "reconciliation totals rounding" });
+surfRank.retrieve();
+const ordered = surfRank.flush();
+assert.ok(
+  ordered.indexOf("src/feed/sync") < ordered.indexOf("policy/rounding"),
+  "the addressed article leads the ranked one",
+);
+pass("addressed articles precede retrieved ones in a flush");
+
+/* Intent is this turn's, and it is evidence-free: a tool RESULT never reaches the
+   query. pi-fold measured a window carrying 29,244 characters of tool output against
+   125 of intent, and every retrieval number it produced was that one defect. */
+assert.equal(intentQuery([{ toolName: "read", input: { file_path: "a/b.ts" } }]), "read a/b.ts");
+assert.equal(intentQuery([{ role: "user", content: "why is the total off" }]), "why is the total off");
+assert.equal(intentQuery([{ role: "toolResult", content: "rounding rounding rounding" }]), "");
+assert.equal(
+  intentQuery([{ role: "user", content: "first" }, { toolName: "grep", input: { pattern: "second" } }]),
+  "grep second\nfirst",
+  "newest intent leads the query",
+);
+pass("the query is intent, never evidence, newest first");
+
+const surfCleared = new Surfacer([{ name: "", dir: projDir, store }], new LexicalRetriever());
+surfCleared.noteIntent("shell", { command: "reconciliation totals rounding" });
+surfCleared.flush();
+surfCleared.retrieve();
+assert.equal(surfCleared.flush(), undefined, "last turn's intent does not rank this turn");
+pass("intent clears at the flush, so a turn is ranked against itself only");
+
+/* A bring-your-own retriever is a function, so the package never carries a model. */
+const byo = {
+  name: "byo",
+  score: (_query, candidates) => new Map(candidates.map((c) => [c.path, c.path === "policy/timezones" ? 0.9 : 0])),
+};
+const surfByo = new Surfacer([{ name: "", dir: projDir, store }], buildRetriever(byo));
+surfByo.noteIntent("read", { file_path: "anything" });
+surfByo.retrieve();
+assert.match(surfByo.flush(), /policy\/timezones/);
+assert.equal(buildRetriever(undefined).name, "none");
+assert.equal(buildRetriever("lexical").name, "lexical");
+assert.throws(() => buildRetriever("embeddings"), /retrieval must be/);
+assert.throws(() => buildRetriever({ score: () => new Map() }), /needs a name/);
+pass("retrieval accepts a built-in name or a caller-supplied scorer, and refuses anything else");
+
+/* A retriever that throws costs the turn its ranking, never the turn. */
+const surfThrow = new Surfacer(
+  [{ name: "", dir: projDir, store }],
+  { name: "angry", score: () => { throw new Error("no model loaded"); } },
+);
+surfThrow.collect([join(projDir, "src/feed/sync.ts")]);
+surfThrow.noteIntent("read", { file_path: "anything" });
+surfThrow.retrieve();
+assert.match(surfThrow.flush(), /src\/feed\/sync/);
+pass("a retriever that throws never breaks the turn");
+
+/* Scores are recorded beside what the line cost, which is what replaced the budget:
+   the cutoff is a question for the data, not a constant chosen in advance. */
+const rankTraceFile = join(work, "retrieval-trace.jsonl");
+process.env.PI_CANON_TRACE = rankTraceFile;
+const surfRankTrace = new Surfacer([{ name: "", dir: projDir, store }], new LexicalRetriever());
+surfRankTrace.collect([join(projDir, "src/feed/sync.ts")]);
+surfRankTrace.noteIntent("shell", { command: "reconciliation totals rounding" });
+surfRankTrace.retrieve();
+surfRankTrace.flush();
+delete process.env.PI_CANON_TRACE;
+const surfacedRows = readFileSync(rankTraceFile, "utf8").trim().split("\n").map(JSON.parse)
+  .filter((row) => row.kind === "surfaced");
+const ranked = surfacedRows.find((row) => row.path === "policy/rounding");
+const addressed = surfacedRows.find((row) => row.path === "src/feed/sync");
+assert.ok(ranked.score > 0 && ranked.chars > 0 && ranked.via === "lexical");
+assert.equal(addressed.score, null, "an addressed article was never ranked and says so");
+assert.equal(addressed.via, "address");
+pass("every surfaced line records what it cost and how relevant it was thought to be");
 
 const surfSettle = new Surfacer([{ name: "", dir: projDir, store }]);
 surfSettle.collect([join(projDir, "src/core/config.ts")]);
@@ -266,6 +496,13 @@ assert.throws(
 );
 pass("unknown options throw by name");
 
+/* A bad retrieval option is a registration error, not a mid-session surprise. */
+const quietPi = { on() {}, registerTool() {}, registerCommand() {} };
+assert.throws(() => registerPiCanon(quietPi, { retrieval: "embeddings" }), /retrieval must be/);
+registerPiCanon(quietPi, { retrieval: "lexical" });
+registerPiCanon(quietPi, { retrieval: { name: "byo", score: () => new Map() } });
+pass("retrieval is validated at registration, built-in name or supplied scorer");
+
 const handlers = {};
 const sent = [];
 const tools = [];
@@ -279,8 +516,11 @@ const fakePi = {
 registerPiCanon(fakePi, {});
 assert.equal(tools.length, 1);
 assert.equal(tools[0].name, "pi_canon");
-assert.ok(handlers.tool_call && handlers.session_start && handlers.turn_end && handlers.agent_settled);
-pass("registration wires the tool and the four events");
+assert.ok(
+  handlers.tool_call && handlers.session_start && handlers.turn_end &&
+  handlers.agent_settled && handlers.context,
+);
+pass("registration wires the tool and the five events");
 
 const notices = [];
 const ctx = { cwd: projDir, ui: { notify: (msg, level) => notices.push({ msg, level }) } };
@@ -369,7 +609,10 @@ pass("a quiet session stays quiet");
 assert.equal(commands.length, 1);
 await commands[0].def.handler("", ctx);
 assert.equal(notices.length, 1);
-assert.match(notices[0].msg, /articles, \d+ journal entries; \d+ seen this session/);
+assert.match(
+  notices[0].msg,
+  /articles, \d+ journal entries; \d+ surfaced this session, \d+ still in context taking \d+ chars/,
+);
 assert.equal(notices[0].level, "info");
 assert.equal(sent.length, 3);
 pass("the status command notifies the user and tells the model nothing");
@@ -407,6 +650,36 @@ for (const fn of surfOffHandlers.turn_end ?? []) fn({ turnIndex: 0 }, ctx);
 for (const fn of surfOffHandlers.agent_settled ?? []) fn(undefined, ctx);
 assert.equal(surfOffSent.length, 0);
 pass("surface: false silences every nudge");
+
+/* resurface is the 2.0 mechanism behind one switch, end to end through the harness:
+   on, an article whose turn left the window comes back on the next touch; off, the
+   context hook is inert and a surfaced article is never surfaced again. */
+function driveResurface(resurface) {
+  const h = {};
+  const out = [];
+  registerPiCanon(
+    { on: (n, f) => (h[n] ??= []).push(f), registerTool() {}, registerCommand() {}, sendMessage: (m) => out.push(m) },
+    { resurface, root: join(work, `resurface-${resurface}`) },
+  );
+  const canonRoot = new CanonStore(join(work, `resurface-${resurface}`));
+  canonRoot.write("src/feed/sync", { capsule: CAPSULE_PRESENT, body: "b" });
+  const touch = () => {
+    for (const fn of h.tool_call) fn({ toolName: "read", input: { file_path: "src/feed/sync.ts" } }, ctx);
+    for (const fn of h.turn_end) fn(undefined, ctx);
+  };
+  touch();
+  const first = out.filter((m) => m.content.includes("src/feed/sync")).length;
+  for (const fn of h.context) fn({ messages: [{ role: "user", content: "everything of ours folded away" }] }, ctx);
+  touch();
+  return { first, after: out.filter((m) => m.content.includes("src/feed/sync")).length };
+}
+const on = driveResurface(true);
+assert.equal(on.first, 1);
+assert.equal(on.after, 2, "resurface: true brings a departed article back on the next touch");
+const off = driveResurface(false);
+assert.equal(off.first, 1);
+assert.equal(off.after, 1, "resurface: false is 1.0 behavior: surfaced once, never again");
+pass("resurface switches presence-based recall on and off end to end");
 
 const rootTools = [];
 registerPiCanon({ on() {}, registerTool: (t) => rootTools.push(t), registerCommand() {} }, { root: "kb" });
@@ -527,5 +800,29 @@ const traceLines = readFileSync(traceFile, "utf8").trim().split("\n").map((l) =>
 assert.ok(traceLines.some((t) => t.kind === "staged"));
 assert.ok(traceLines.some((t) => t.kind === "flushed"));
 pass("PI_CANON_TRACE audits the staged and flushed funnel");
+
+
+/* An article rewritten mid-session reindexes. `updated` has day granularity, so any
+   change check built from it would call a same-session rewrite unchanged and serve a
+   stale ranking for the rest of the run. The residue is small by construction, so it is
+   rebuilt every turn instead. */
+const reindexStore = new CanonStore(join(work, "reindex/.canon"));
+mkdirSync(join(work, "reindex"), { recursive: true });
+reindexStore.write("policy/one", { capsule: "Nothing about vendor pagination here.", body: "b" });
+let indexedWith = null;
+const watchful = {
+  name: "watchful",
+  index: (candidates) => (indexedWith = candidates.map((c) => c.capsule).join("|")),
+  score: () => new Map(),
+};
+const surfReindex = new Surfacer([{ name: "", dir: join(work, "reindex"), store: reindexStore }], watchful);
+surfReindex.noteIntent("read", { file_path: "x" });
+surfReindex.retrieve();
+assert.match(indexedWith, /Nothing about vendor pagination/);
+reindexStore.write("policy/one", { capsule: "Vendor pagination caps at 1000.", body: "b" });
+surfReindex.noteIntent("read", { file_path: "x" });
+surfReindex.retrieve();
+assert.match(indexedWith, /caps at 1000/, "a same-day rewrite still reindexes");
+pass("the retrieval index never goes stale against a same-session rewrite");
 
 console.log(`\nall ${gates} gates green`);

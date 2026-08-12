@@ -94,7 +94,9 @@ function run(runtime: CanonRuntime, params: Record<string, unknown>): string {
       if (!article) {
         return `No article governs ${path}. If you are working on this asset, create its article with write after the task.`;
       }
-      surfacer.markSeen(qualify(article.path));
+      /* The capsule is the mark: this result carries it below, so presence can be
+         tested against the same string whichever way the article entered the window. */
+      surfacer.markSeen(qualify(article.path), article.capsule);
       const title = article.path === path ? qualify(article.path) : `${qualify(article.path)} governs ${qualify(path)}`;
       const head = [
         article.capsule ? `capsule: ${article.capsule}` : "",
