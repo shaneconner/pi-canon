@@ -13,7 +13,7 @@ const projectRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const jiti = createJiti(import.meta.url);
 
 const { CanonStore, normalize } = await jiti.import(join(projectRoot, "extensions/lib/store.ts"));
-const { advise, BODY_WARN_CHARS, BODY_LARGE_CHARS, CAPSULE_CHARS } = await jiti.import(join(projectRoot, "extensions/lib/lint.ts"));
+const { advise, unretained, BODY_WARN_CHARS, BODY_LARGE_CHARS, CAPSULE_CHARS } = await jiti.import(join(projectRoot, "extensions/lib/lint.ts"));
 const { Surfacer } = await jiti.import(join(projectRoot, "extensions/lib/surfacing.ts"));
 const { buildRetriever, governsAnAsset, intentQuery, LexicalRetriever, residue, userIntent } =
   await jiti.import(join(projectRoot, "extensions/lib/retrieval.ts"));
@@ -976,5 +976,45 @@ assert.equal(
   0,
 );
 pass("the scope question is asked once, and never of an article already off the asset path");
+
+/* --- values must survive distillation --------------------------------------------
+   capbase, 8 plant sessions: the journal held every declared value 48/48 and the
+   article kept 13/48, and what survived was exactly the value about the article's own
+   asset. cap1 then measured what that costs: an article stating a rule's shape without
+   its values scores 0/4, the same as no article at all. The journal is the provenance,
+   so the check is a literal diff and needs no model. */
+const valDir = join(work, "values");
+mkdirSync(join(valDir, "ops"), { recursive: true });
+writeFileSync(join(valDir, "ops/billing.py"), "# emitter\n");
+const valStore = new CanonStore(join(valDir, ".canon"));
+const SOURCE =
+  "Compliance said registered ids are scheduler-owned: billing-close, " +
+  "inventory-reconcile and nightly-dispatch. The nightly close ran as ops-bot for " +
+  "eleven weeks and 40,000 actions landed on that person.";
+
+const thin = valStore.write("ops/billing", {
+  capsule: "close_period uses system:billing-close.",
+  body: "close_period emits period.close with actor system:billing-close.",
+});
+const missing = unretained(SOURCE, thin);
+assert.ok(missing.includes("nightly-dispatch"), "the other registered ids are the loss");
+assert.ok(missing.includes("inventory-reconcile"));
+assert.ok(missing.includes("ops-bot"));
+assert.ok(missing.some((v) => v.includes("40,000")), "counts are values too");
+assert.ok(missing.some((v) => /eleven weeks/i.test(v)), "durations are values too");
+assert.ok(!missing.includes("billing-close"), "what the article kept is not reported");
+pass("a journal entry names the values its article dropped");
+
+const fat = valStore.write("ops/billing", {
+  capsule: "Registered jobs: billing-close, inventory-reconcile, nightly-dispatch.",
+  body: SOURCE,
+});
+assert.deepEqual(unretained(SOURCE, fat), [], "an article carrying the values draws nothing");
+pass("an article that kept its values is not nagged");
+
+assert.deepEqual(unretained(SOURCE, undefined), [], "no article is not a retention failure");
+assert.deepEqual(unretained("Renamed the helper and tidied imports.", thin), [],
+  "prose with no values in it reports nothing");
+pass("the value check stays silent with no article and with no values");
 
 console.log(`\nall ${gates} gates green`);

@@ -2,7 +2,7 @@
    for events; map to orient. */
 
 import { basename } from "node:path";
-import { advise } from "./lint.ts";
+import { advise, unretained } from "./lint.ts";
 import { normalize, type CanonStore } from "./store.ts";
 import type { Mount, Surfacer } from "./surfacing.ts";
 
@@ -40,7 +40,10 @@ export function buildCanonTool(ready: (ctx: unknown) => CanonRuntime, retrieval 
       "(src/core/config, lake/prices). read the governing article before working on an asset; " +
       "write it after real changes. journal appends an immutable event entry: record the source " +
       "as it happened, names and exact numbers included, because articles distill and only the " +
-      "journal keeps the original. map lists articles with their capsules. " +
+      "journal keeps the original, so distil the prose but carry exact values through verbatim: " +
+      "ids, keys, names, counts, limits and durations, every member of a named set and not " +
+      "just the one you are working on. A rule without its values is worth nothing to the " +
+      "session that needs it. map lists articles with their capsules. " +
       "Creation is rare: prefer updating the article that already governs. " +
       "File a constraint at the asset it governs, or the shared parent when it spans assets, not " +
       "the asset you happened to edit. " + filingTail(retrieval),
@@ -167,7 +170,29 @@ function run(runtime: CanonRuntime, params: Record<string, unknown>): string {
         subject,
         slug: typeof params.slug === "string" ? params.slug : undefined,
       });
-      return `Logged ${basename(file)}.`;
+      /* The article was written before this entry (agents write then journal), so this
+         is the first moment both exist. Report what the source kept and the article did
+         not: capbase measured the journal holding every value and the article keeping a
+         quarter of them, and cap1 measured an article without its values scoring exactly
+         what no article scores. */
+      const missed: string[] = [];
+      for (const address of subject ?? []) {
+        const routed = route(runtime, address);
+        const governing = routed.mount.store.read(routed.path);
+        for (const value of unretained(body, governing)) {
+          missed.push(`${routed.path} is missing ${value}`);
+        }
+      }
+      return [
+        `Logged ${basename(file)}.`,
+        ...(missed.length
+          ? [
+              `This entry records values its article does not carry: ${missed.slice(0, 6).join("; ")}. ` +
+                "The article is what surfaces on a touch; the journal is not. If those values " +
+                "matter beyond this event, put them in the article verbatim.",
+            ]
+          : []),
+      ].join("\n");
     }
     case "map":
       return store.map(path);

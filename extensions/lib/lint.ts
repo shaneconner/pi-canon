@@ -23,6 +23,54 @@ export interface Reach {
   retrieval: string;
 }
 
+/* Value-shaped tokens. Not an attempt to understand the text: these are the shapes a
+   fact takes when it cannot be paraphrased without being destroyed. An id, a key, a
+   count, a duration. Prose survives distillation; these are what it drops. */
+const CARDINAL =
+  "(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|" +
+  "fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|" +
+  "eighty|ninety|hundred|thousand|million)";
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+const VALUE_SHAPES: RegExp[] = [
+  /`([^`\n]{2,60})`/g, //                                    backticked
+  /"([^"\n]{2,60})"/g, //                                    quoted
+  /\b([a-z][a-z0-9]*(?:-[a-z0-9]+)+)\b/gi, //                hyphenated id: nightly-dispatch
+  /\b([A-Z][A-Z0-9]*_[A-Z0-9_]+)\b/g, //                     SNAKE_CASE
+  /\b([a-z][a-z0-9]*\.[a-z][a-z0-9]+)\b/g, //                dotted: period.close
+  /\b(\d[\d,]*(?:\.\d+)?\s*%?)/g, //                         counts and limits: 40,000
+  new RegExp(`\\b(${CARDINAL}\\s+[a-z]{3,})\\b`, "gi"), //   spelled durations: eleven weeks
+];
+
+const VALUE_CAP = 6;
+
+function valuesIn(text: string): string[] {
+  const found = new Map<string, string>();
+  for (const shape of VALUE_SHAPES) {
+    for (const match of text.matchAll(shape)) {
+      const value = (match[1] ?? "").trim();
+      if (value.length < 2 || ISO_DATE.test(value)) continue;
+      found.set(value.toLowerCase(), value);
+    }
+  }
+  return [...found.values()];
+}
+
+/* The values this journal entry recorded that its article did not keep.
+   cap1 measured what this is for: an article stating a rule's shape without its values
+   scores exactly what no article scores, and capbase found the journal holding every
+   value 48/48 while the article kept 13/48. The journal is the provenance, so the check
+   is a literal diff and needs no model: what did you just write down that the article
+   someone else will read does not carry. */
+export function unretained(journalBody: string, article: Article | undefined): string[] {
+  if (!article) return [];
+  const kept = `${article.capsule} ${article.body}`.toLowerCase().replace(/\s+/g, " ");
+  return valuesIn(journalBody)
+    .filter((value) => !kept.includes(value.toLowerCase().replace(/\s+/g, " ")))
+    .sort((a, b) => b.length - a.length)
+    .slice(0, VALUE_CAP);
+}
+
 export function advise(
   article: Article,
   store: CanonStore,
