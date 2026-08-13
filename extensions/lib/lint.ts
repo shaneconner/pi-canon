@@ -100,7 +100,10 @@ export function advise(
   /* The laundering guard: an agent that just violated a documented constraint will
      faithfully update the article to describe the violation as current truth. Name
      what disappeared; whether it still holds is the agent's call, stated out loud. */
-  if (priorBody !== undefined) {
+  /* Only when this write actually replaced the body. priorBody is now the article's real
+     prior state on every write, including capsule-only ones, because the scope question
+     below needs it; a capsule-only write drops nothing, so it has nothing to launder. */
+  if (priorBody !== undefined && article.body !== priorBody) {
     const kept = article.body.replace(/\s+/g, " ");
     const dropped = priorBody
       .split(/\r?\n/)

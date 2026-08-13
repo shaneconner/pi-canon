@@ -519,6 +519,38 @@ assert.ok(
 );
 pass("addressed articles precede retrieved ones in a flush");
 
+/* Sharing one token with the query scores above zero, so an unbounded fan-out lets a
+   large residue fill a message with guesses. The cap is on transport, not relevance:
+   what does not ride this turn is still eligible next turn, and the addressed line is
+   never one of the things counted, because the address is a certainty. */
+const fanStore = new CanonStore(join(work, "fan", ".canon"));
+for (let i = 0; i < 9; i += 1) {
+  fanStore.write(`policy/rounding-${i}`, {
+    capsule: `Rule ${i}: reconciliation rounding rule number ${i}.`,
+    body: `Reconciliation rounding, variant ${i}. ${"detail ".repeat(i + 1)}`,
+  });
+}
+const fanDir = join(work, "fan");
+const surfFan = new Surfacer([{ name: "", dir: fanDir, store: fanStore }], new LexicalRetriever());
+surfFan.collect([join(fanDir, "src/feed/sync.ts")]);
+surfFan.noteIntent("shell", { command: "reconciliation rounding rule" });
+surfFan.retrieve();
+const fanned = surfFan.flush().split("\n").filter((line) => line.startsWith("policy/"));
+assert.equal(fanned.length, 3, `nine matching articles rode one message: ${fanned.length}`);
+pass("ranked articles are capped per message; the address spine is not counted against it");
+
+/* Held back, not discarded. The next turn stages the next three, so a large residue is
+   delivered over turns rather than dropped or dumped at once. */
+surfFan.noteIntent("shell", { command: "reconciliation rounding rule" });
+surfFan.retrieve();
+const second = surfFan.flush().split("\n").filter((line) => line.startsWith("policy/"));
+assert.equal(second.length, 3, "the next turn carries the next three");
+assert.ok(
+  !second.some((line) => fanned.includes(line)),
+  "the second message repeats nothing from the first",
+);
+pass("what the cap held back is still eligible on the following turn");
+
 /* Intent is this turn's, and it is evidence-free: a tool RESULT never reaches the
    query. pi-fold measured a window carrying 29,244 characters of tool output against
    125 of intent, and every retrieval number it produced was that one defect. */
@@ -1015,6 +1047,16 @@ assert.ok(bounded.at(-1).content.includes("question 39"), "the newest speech is 
 assert.ok(!bounded.some((p) => p.content.includes("question 0")), "the oldest is dropped");
 pass("user speech is bounded and newest-first, per the position control");
 
+/* And the cut inside one over-long message goes the same way. A pasted spec whose actual
+   ask sits at the end used to lose exactly the ask, because the function walked the window
+   newest first and then kept the oldest part of the message it landed on. */
+const longAsk = "PREAMBLE. ".repeat(400) + "So please fix the reconciliation rounding.";
+const tail = userIntent([{ role: "user", content: longAsk }]);
+assert.ok(tail[0].content.endsWith("So please fix the reconciliation rounding."), "the ask survives");
+assert.ok(!tail[0].content.startsWith("PREAMBLE. PREAMBLE."), "the preamble is what gets dropped");
+assert.ok(tail[0].content.length <= 1500, "and it is still bounded");
+pass("an over-long message is cut at its head, not its tail");
+
 /* End to end: a question with no tool call at all still retrieves, which is exactly the
    turn an unaddressed article is for. */
 const surfSpoken = new Surfacer([{ name: "", dir: projDir, store }], new LexicalRetriever());
@@ -1152,6 +1194,39 @@ assert.equal(
   "an article that declared itself is not asked again",
 );
 pass("an off-path rule is asked to declare itself, and stops being asked once it has");
+
+/* A declaration has to be revocable, or the first one is permanent. The tool's enum is
+   the model's whole vocabulary, so "asset" exists to mean the default: the address is the
+   claim. Exercised through the tool, because that is where the trap was: every value but
+   the enum's own falls through to undefined, which means untouched. */
+const scopeTools = [];
+registerPiCanon({ on() {}, registerTool: (t) => scopeTools.push(t), registerCommand() {} }, { retrieval: "lexical" });
+const scopeCtx = { cwd: scopeDir, ui: { notify() {} } };
+const write = (params) =>
+  scopeTools[0].execute("id", params, undefined, undefined, scopeCtx).then((r) => r.content[0].text);
+
+await write({ action: "write", path: "policy/revocable", scope: "rule", body: RULE_BODY });
+assert.equal(scopeStore.read("policy/revocable").scope, RULE_SCOPE);
+await write({ action: "write", path: "policy/revocable", scope: "asset" });
+assert.equal(scopeStore.read("policy/revocable").scope, "", "scope asset takes the declaration back");
+assert.equal(scopeStore.read("policy/revocable").body.trim(), RULE_BODY, "and leaves the body alone");
+assert.deepEqual(
+  scopeTools[0].parameters.properties.scope.enum, ["rule", "asset"],
+  "and the model has the vocabulary to say it",
+);
+pass("a declared rule can stop being one");
+
+/* The scope question fires on the write that TURNS an article into one carrying a rule.
+   A capsule-only write turns nothing: the body is untouched and has carried the same rule
+   all along. It re-fired because the prior body was only read when a body was supplied, so
+   the trigger tested itself against the empty string every time. */
+const firstAsk = await write({ action: "write", path: "policy/quiet", body: RULE_BODY, capsule: "c" });
+assert.match(firstAsk, /governs no asset on disk/, "the write that brings the rule is asked");
+const capsuleOnly = await write({ action: "write", path: "policy/quiet", capsule: "a tighter line" });
+assert.doesNotMatch(capsuleOnly, /governs no asset on disk/, "a capsule-only write is not asked again");
+assert.equal(scopeStore.read("policy/quiet").body.trim(), RULE_BODY, "and the body survives it");
+assert.equal(scopeStore.read("policy/quiet").capsule, "a tighter line", "which is the point of the write");
+pass("a capsule-only write does not re-ask a question the body already answered");
 
 /* Membership is unchanged: a declaration the agent forgot must never cost it the one
    mechanism that can reach it. The flag reports, it does not filter. */

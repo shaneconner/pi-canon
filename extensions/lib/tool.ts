@@ -78,10 +78,11 @@ export function buildCanonTool(ready: (ctx: unknown) => CanonRuntime, retrieval 
         capsule: { type: "string", description: "write: one dense line injected when the asset is touched." },
         scope: {
           type: "string",
-          enum: ["rule"],
+          enum: ["rule", "asset"],
           description:
-            "write: set to 'rule' when this article names a cross-cutting rule instead of " +
-            "governing an asset, so it is a rule on purpose rather than an article whose asset went missing.",
+            "write: 'rule' when this article names a cross-cutting rule instead of governing an " +
+            "asset, so it is a rule on purpose rather than an article whose asset went missing; " +
+            "'asset' to take that back, when the article governs an asset after all.",
         },
         subject: {
           type: "array",
@@ -170,11 +171,21 @@ function run(runtime: CanonRuntime, params: Record<string, unknown>): string {
       if (!path) return "write needs a path.";
       /* Blank means untouched: models fill declared string fields with "" routinely,
          and a "" here would silently erase stored content. */
-      const priorBody = params.body ? store.read(path)?.body : undefined;
+      /* The stored body BEFORE this write, whether or not this write supplies one. Read
+         only when a body was supplied, it was undefined on every capsule-only write, so
+         the scope question tested its trigger against "" and re-fired on an article that
+         had carried the same rule for weeks. What the advice needs is the article's real
+         prior state; which fields this call happened to set is a separate question and is
+         answered separately below. */
+      const prior = store.read(path);
       const article = store.write(path, {
         capsule: params.capsule ? String(params.capsule) : undefined,
         body: params.body ? String(params.body) : undefined,
-        scope: params.scope ? String(params.scope) : undefined,
+        /* "asset" is the way back. The enum is the only vocabulary the model has, so
+           without a second value an article declared `scope: rule` could never stop being
+           one: every other input falls through to undefined, which means untouched. It
+           stores empty, which is the default state, the address being the claim. */
+        scope: params.scope === "asset" ? "" : params.scope ? String(params.scope) : undefined,
       });
       /* What this write put in the window, which is what the agent supplied, not the
          merged article: a capsule-only write does not deliver the stored body. */
@@ -184,7 +195,7 @@ function run(runtime: CanonRuntime, params: Record<string, unknown>): string {
       );
       return [
         `Wrote ${qualify(article.path)}.`,
-        ...advise(article, store, priorBody, { dir: mount.dir, retrieval: runtime.retrieval }),
+        ...advise(article, store, prior?.body, { dir: mount.dir, retrieval: runtime.retrieval }),
       ].join("\n");
     }
     case "journal": {

@@ -109,7 +109,12 @@ export function userIntent(messages: unknown): IntentTurn[] {
     if (message.customType === "pi-canon") continue;
     const text = messageText(message.content).trim();
     if (!text || text.startsWith("[pi-canon]")) continue;
-    const bounded = text.slice(0, USER_INTENT_CHARS - chars);
+    /* The TAIL of an over-long message, not its head. This function walks the window
+       newest first on the strength of a measured position effect, and then, at the one
+       place it has to cut, it was keeping the oldest part of the message and dropping the
+       newest. A pasted spec with the actual ask at the end lost exactly the ask. The
+       principle is the same at both scales: what is nearest to now is the query. */
+    const bounded = text.slice(-(USER_INTENT_CHARS - chars));
     chars += bounded.length;
     picked.push({ role: "user", content: bounded });
   }

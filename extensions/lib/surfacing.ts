@@ -66,6 +66,11 @@ const PATHLIKE = /(?:^|[\s"'`=:,([{])(\/?[\w.@-]+(?:\/[\w.@-]+)+)/g;
 const MARK_CHARS = 120;
 const MARK_MINIMUM = 24;
 
+/* How many RANKED articles may ride one message. Not a relevance threshold: see
+   retrieve(). Three because a nudge is read or it is not, and the addressed lines it
+   shares the message with are the ones that were certain. */
+const RETRIEVED_PER_TURN = 3;
+
 function fingerprint(text: string): string {
   return text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
@@ -267,8 +272,15 @@ export class Surfacer {
      what it cost, so context taken can be read against relevance afterwards. Deciding
      it in advance with a constant is the mistake the session budget already made.
 
-     The project store only. A mount is somebody else's directory and its residue is
-     their business, and the spine already serves mounted assets by address. */
+     What IS bounded is how many of them ride one message, and that is a different thing
+     from a threshold. A threshold rules on relevance; this rules on transport. Sharing
+     one token with the query is enough to score above zero, so a residue of fifty rule
+     articles and a query saying "export" stages fifty lines, and every one of them is
+     unrequested context the agent never asked to spend. The address spine is exempt
+     because an addressed article is a certainty and the agent touched its asset; ranked
+     candidates are guesses, and a guess does not get to fill the window. Nothing is
+     discarded: what does not fit is still eligible next turn, and the trace records what
+     was held back, so the cutoff question stays answerable from data. */
   retrieve(): void {
     if (this.retriever === NONE) return;
     /* Oldest first, so intentQuery's newest-first walk reads in true order: this turn's
@@ -293,10 +305,12 @@ export class Surfacer {
       trace("retrieval-failed", { retriever: this.retriever.name, error: String(error) });
       return; /* a retriever that throws must never break the turn */
     }
-    for (const candidate of candidates) {
-      const score = scores.get(candidate.path);
-      if (!(typeof score === "number") || !(score > 0)) continue;
-      if (this.seen.has(candidate.path) || this.staged.has(candidate.path)) continue;
+    const ranked = candidates
+      .map((candidate) => ({ candidate, score: scores.get(candidate.path) }))
+      .filter((entry) => typeof entry.score === "number" && entry.score > 0)
+      .filter((entry) => !this.seen.has(entry.candidate.path) && !this.staged.has(entry.candidate.path))
+      .sort((a, b) => (b.score as number) - (a.score as number));
+    for (const { candidate, score } of ranked.slice(0, RETRIEVED_PER_TURN)) {
       this.staged.set(candidate.path, {
         capsule: candidate.capsule,
         stamp: candidate.updated ? ` (updated ${candidate.updated})` : "",
@@ -309,6 +323,16 @@ export class Surfacer {
         score,
         /* So a run can report how much of what it ranked was a rule on purpose. */
         declared: candidate.declared,
+      });
+    }
+    const held = ranked.slice(RETRIEVED_PER_TURN);
+    if (held.length) {
+      trace("retrieval-held", {
+        count: held.length,
+        /* The best score that did NOT ride this turn, against the worst that did: the
+           pair that says whether the cap ever cut anything worth carrying. */
+        bestHeld: held[0].score,
+        worstSent: ranked[RETRIEVED_PER_TURN - 1].score,
       });
     }
   }
