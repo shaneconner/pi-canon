@@ -11,12 +11,15 @@ export interface Article {
   path: string;
   capsule: string;
   updated: string;
+  /* Declared scope. "rule" means this article names a cross-cutting rule and is not
+     expected to govern an asset; empty means the address is the claim, as usual. */
+  scope: string;
   extra: string[];
   body: string;
 }
 
 const FRONT_MATTER = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
-const OWNED_KEYS = new Set(["capsule", "updated"]);
+const OWNED_KEYS = new Set(["capsule", "updated", "scope"]);
 
 /* Keep an address inside the tree: .. resolves against its own segments, so
    a/b/../c means a/c, and clamps at the root, so nothing ever escapes. */
@@ -99,6 +102,7 @@ function serialize(article: Article): string {
   const meta = [
     article.capsule ? `capsule: ${scalar(article.capsule)}` : "",
     `updated: ${article.updated}`,
+    article.scope ? `scope: ${scalar(article.scope)}` : "",
     ...article.extra,
   ].filter(Boolean).join("\n");
   return `---\n${meta}\n---\n${article.body.trimEnd()}\n`;
@@ -134,6 +138,7 @@ export class CanonStore {
       extra,
       capsule: typeof meta.capsule === "string" ? meta.capsule : "",
       updated: typeof meta.updated === "string" ? meta.updated : "",
+      scope: typeof meta.scope === "string" ? meta.scope : "",
     };
   }
 
@@ -163,7 +168,7 @@ export class CanonStore {
     return walk(this.articlesDir, "").sort();
   }
 
-  write(path: string, fields: { capsule?: string; body?: string }): Article {
+  write(path: string, fields: { capsule?: string; body?: string; scope?: string }): Article {
     path = contain(path);
     const prior = this.read(path);
     /* Agents sometimes paste a whole file as the body, front matter included; stored
@@ -178,6 +183,7 @@ export class CanonStore {
       path,
       capsule: (fields.capsule ?? prior?.capsule ?? "").replace(/\s*\n\s*/g, " ").trim(),
       updated: today(),
+      scope: (fields.scope ?? prior?.scope ?? "").trim(),
       extra: prior?.extra ?? [],
       body,
     };

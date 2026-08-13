@@ -25,6 +25,9 @@ export interface Candidate {
   capsule: string;
   body: string;
   updated: string;
+  /* Whether this article SAID it is a cross-cutting rule, rather than being inferred
+     into the corpus by having no asset. See residue below. */
+  declared: boolean;
 }
 
 export interface Retriever {
@@ -269,20 +272,44 @@ export function buildRetriever(option: RetrievalOption | undefined): Retriever {
   );
 }
 
-/* The residue: articles at addresses that govern no asset on disk. These are exactly
-   the ones the spine can never surface, because surfacing is triggered by touching an
-   asset and there is nothing to touch. Everything else is already answered for free and
-   must not be ranked, or retrieval would compete with the address instead of completing
-   it. */
+/* The residue: articles the spine can never surface, because surfacing is triggered by
+   touching an asset and there is nothing here to touch. Everything else is already
+   answered for free and must not be ranked, or retrieval would compete with the address
+   instead of completing it.
+
+   Membership is still decided by having no asset, and that is deliberate: an article
+   unreachable by address has exactly one mechanism left, and dropping it from that
+   mechanism would lose it outright. But the set has always held two populations, and
+   until now nothing could tell them apart (Codex, 2026-08-12). One is the deliberate
+   cross-cutting rule the doctrine asks for, filed at an address naming the rule. The
+   other is an accident: a typo in an address, or an article whose asset was deleted
+   under it. Defining the corpus only by what it is not made those the same thing.
+
+   So an article may DECLARE itself with `scope: rule`, and every candidate carries
+   whether it did. Nothing here filters on it, because a declaration the agent forgot
+   must not cost it the only mechanism that can reach it. What the flag buys is honesty:
+   a declared article is a rule on purpose, an undeclared one is a question, and the two
+   stop being counted as one number. */
 export function residue(store: CanonStore, dir: string): Candidate[] {
   const out: Candidate[] = [];
   for (const path of store.list()) {
     if (governsAnAsset(dir, path)) continue;
     const article = store.read(path);
-    if (article) out.push({ path, capsule: article.capsule, body: article.body, updated: article.updated });
+    if (article) {
+      out.push({
+        path,
+        capsule: article.capsule,
+        body: article.body,
+        updated: article.updated,
+        declared: article.scope === RULE_SCOPE,
+      });
+    }
   }
   return out;
 }
+
+/* The one declared value. A second would be a taxonomy, and nothing has asked for one. */
+export const RULE_SCOPE = "rule";
 
 /* An address governs an asset when something on disk normalizes back to it. Addresses
    drop the extension, so `src/core/config` has to match `src/core/config.ts` as well as

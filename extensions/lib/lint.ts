@@ -1,7 +1,7 @@
 /* Advisory only: advice strings, never a refusal. A blocked write teaches an agent
    to stop writing; a warning teaches it what to do next. */
 
-import { governsAnAsset } from "./retrieval.ts";
+import { governsAnAsset, RULE_SCOPE } from "./retrieval.ts";
 import { normalize, type Article, type CanonStore } from "./store.ts";
 
 export const BODY_WARN_CHARS = 8000;
@@ -118,6 +118,26 @@ export function advise(
         `Anything working on a different asset resolves to its own article and never reaches this one. ` +
         `If the rule holds beyond ${article.path}, give it its own address naming the rule instead, ` +
         "where relevance to the work can find it.",
+    );
+  }
+
+  /* The complement of the scope question above. That one fires when a rule lands at an
+     address that governs an asset and says move it off. This one fires when a rule
+     lands where no asset lives, which is exactly where the doctrine asked for it, and
+     says name it as such. Undeclared, that article is indistinguishable from one whose
+     asset was deleted under it, and the two want opposite things: one is the design
+     working, the other is knowledge quietly going stale. Same trigger as the scope
+     question, so an article is asked once and a store being maintained stays quiet.
+     It cannot catch a stale article that never carried a rule, and nothing here can. */
+  if (
+    reach && reach.retrieval !== "none" &&
+    CONSTRAINT.test(article.body) && !CONSTRAINT.test(priorBody ?? "") &&
+    !governsAnAsset(reach.dir, article.path) && article.scope !== RULE_SCOPE
+  ) {
+    advice.push(
+      `${article.path} governs no asset on disk, so relevance is the only thing that reaches it. ` +
+        "If that is deliberate and this names a rule, write it again with scope rule; an undeclared " +
+        "article here reads the same as one whose asset was deleted under it.",
     );
   }
 
