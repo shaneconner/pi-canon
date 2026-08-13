@@ -148,6 +148,22 @@ assert.deepEqual(store.journalMentions("src/core/config"), [`${today}-inception.
 assert.deepEqual(store.journalMentions("no/such/thing"), []);
 pass("journal entries index by subject");
 
+/* Ordering is by the recorded instant, not the filename. Names are date plus slug with
+   -2, -3 for collisions, so lexicographic order puts -10 before -2 and the unsuffixed
+   name after every suffixed one: "the newest three" was not the newest three. */
+const seq = [];
+for (let n = 1; n <= 11; n += 1) seq.push(store.journal({ body: `Event ${n}.`, slug: "seq", subject: ["src/ordered"] }));
+const byTime = store.journalMentions("src/ordered");
+assert.deepEqual(byTime, seq.map((f) => f.split("/").at(-1)), "entries come back in the order written");
+assert.ok(byTime.at(-1).includes("-11"), "the eleventh entry is last, not the second");
+pass("the journal orders by when an entry was recorded, not by how its filename sorts");
+
+/* A subject containing a comma used to split into two nonexistent addresses. */
+store.journal({ body: "Odd address.", slug: "comma", subject: ["src/a,b/thing"] });
+assert.equal(store.journalMentions("src/a,b/thing").length, 1);
+assert.deepEqual(store.journalMentions("src/a"), []);
+pass("a subject address containing a comma survives the round trip");
+
 const mapped = store.map();
 assert.match(mapped, /src\/core\/config: Loads layered config/);
 assert.match(store.map("src/core"), /config/);
@@ -655,6 +671,24 @@ assert.equal(sent.length, 3);
 assert.match(sent[2].msg.content, /Touched but not updated/);
 assert.equal(sent[2].opts.deliverAs, "nextTurn");
 pass("settle delivers the write after reminder for the next turn");
+
+/* A send that throws must not leave the package believing the agent was told. Both
+   flush and settle commit their work before handing the message over, because the
+   message is built from that work, so a failed send has to put it back. */
+const surfUndo = new Surfacer([{ name: "", dir: projDir, store }]);
+surfUndo.collect([join(projDir, "src/feed/sync.ts")]);
+const firstTry = surfUndo.flush();
+assert.match(firstTry, /src\/feed\/sync/);
+assert.equal(surfUndo.stats.present, 1);
+assert.equal(surfUndo.settleNudge() !== undefined, true);
+
+surfUndo.undoFlush();
+assert.equal(surfUndo.stats.present, 0, "nothing counts as seen after a failed send");
+assert.equal(surfUndo.stats.surfaced, 0, "and nothing counts as surfaced");
+assert.equal(surfUndo.stats.chars, 0, "and it occupies no context");
+assert.equal(surfUndo.flush(), firstTry, "the same line is offered again next turn");
+assert.match(surfUndo.settleNudge(), /Touched but not updated/, "and the reminder is still owed");
+pass("a delivery that throws is undone and offered again, not silently believed");
 
 const result = await tools[0].execute("id", { action: "read", path: "src/core/config" }, undefined, undefined, ctx);
 assert.match(result.content[0].text, /Current truth about config loading/);

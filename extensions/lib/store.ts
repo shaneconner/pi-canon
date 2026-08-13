@@ -104,6 +104,25 @@ function unscalar(value: string): string {
   return value;
 }
 
+/* Which collision an entry was: name.md is the first, name-2.md the second. A burst of
+   entries lands inside one millisecond and shares a stamp, so this is what actually
+   separates them, and it is the same counter that wrote the file. */
+function sequenceOf(name: string): number {
+  return Number(/-(\d+)\.md$/.exec(name)?.[1] ?? 1);
+}
+
+/* An inline array of scalars, each optionally quoted. Splitting on every comma broke
+   any value that legitimately contained one. */
+function subjectList(raw: string): string[] {
+  const inner = raw.trim().replace(/^\[|\]$/g, "");
+  const out: string[] = [];
+  for (const match of inner.matchAll(/"((?:[^"\\]|\\.)*)"|([^,]+)/g)) {
+    const value = match[1] !== undefined ? unscalar(`"${match[1]}"`) : (match[2] ?? "").trim();
+    if (value) out.push(value);
+  }
+  return out;
+}
+
 function today(): string {
   return new Date().toISOString().slice(0, 10);
 }
@@ -210,8 +229,17 @@ export class CanonStore {
     const slug =
       (entry.slug ?? "entry").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "entry";
     mkdirSync(this.journalDir, { recursive: true });
-    const front = entry.subject?.length ? `---\nsubject: [${entry.subject.join(", ")}]\n---\n` : "";
-    const text = `${front}${entry.body.trimEnd()}\n`;
+    /* An explicit instant, because the filename cannot carry one. Entries are named by
+       date plus slug with -2, -3 for collisions, and sorting those lexicographically puts
+       -10 before -2 and the unsuffixed name after every suffixed one, so "the newest
+       three" was not the newest three (Codex, 2026-08-13). Subjects are quoted through
+       the same scalar() as everything else, so an address containing a comma survives
+       the round trip instead of splitting into two. */
+    const front = [
+      entry.subject?.length ? `subject: [${entry.subject.map(scalar).join(", ")}]` : "",
+      `logged: ${new Date().toISOString()}`,
+    ].filter(Boolean).join("\n");
+    const text = `---\n${front}\n---\n${entry.body.trimEnd()}\n`;
     for (let n = 1; ; n += 1) {
       const file = join(this.journalDir, `${today()}-${slug}${n > 1 ? `-${n}` : ""}.md`);
       try {
@@ -233,15 +261,22 @@ export class CanonStore {
 
   /* Journal entries whose subject names this address: the index a read surfaces
      so the agent can dig into event history when it wants more than current truth. */
+  /* Oldest first, by the instant the entry recorded rather than by its filename. */
   journalMentions(path: string): string[] {
     try {
-      return readdirSync(this.journalDir)
-        .filter((name) => {
-          if (!name.endsWith(".md")) return false;
-          const subject = /^subject:\s*(.*)$/m.exec(readFileSync(join(this.journalDir, name), "utf8"))?.[1] ?? "";
-          return subject.replace(/^\[|\]$/g, "").split(",").some((s) => s.trim() === path);
-        })
-        .sort();
+      const found: { name: string; at: string }[] = [];
+      for (const name of readdirSync(this.journalDir)) {
+        if (!name.endsWith(".md")) continue;
+        const text = readFileSync(join(this.journalDir, name), "utf8");
+        const subject = /^subject:\s*(.*)$/m.exec(text)?.[1] ?? "";
+        if (!subjectList(subject).includes(path)) continue;
+        /* Hand written and pre-2.0 entries have no stamp; the date in the name is the
+           best available and still orders them against each other. */
+        found.push({ name, at: /^logged:\s*(.*)$/m.exec(text)?.[1]?.trim() || name.slice(0, 10) });
+      }
+      return found
+        .sort((a, b) => (a.at === b.at ? sequenceOf(a.name) - sequenceOf(b.name) : a.at.localeCompare(b.at)))
+        .map((entry) => entry.name);
     } catch {
       return [];
     }

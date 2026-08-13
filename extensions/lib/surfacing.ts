@@ -124,6 +124,10 @@ export class Surfacer {
      budget was removed: the analysis wants context taken beside relevance. */
   private cost = new Map<string, number>();
   private surfacedEver = new Set<string>();
+  /* What the last flush and settle committed on the assumption the message would be
+     delivered. Kept so a failed send can be undone rather than silently believed. */
+  private lastFlush = new Map<string, { capsule: string; stamp: string; asset: string; score?: number }>();
+  private lastNudge: string[] = [];
 
   constructor(mounts: Mount[], retriever: Retriever = NONE, resurface = true) {
     this.mounts = mounts;
@@ -152,6 +156,15 @@ export class Surfacer {
     this.seen.add(path);
     this.remember(path, entered);
     this.staged.delete(path);
+    /* Counted like a flushed line. The session budget was deleted in favour of measuring
+       what context is actually taken, so a full read that recorded neither its cost nor
+       its having happened left the measurement reporting present=1 at chars=0 (Codex,
+       2026-08-13). A read is the largest thing this package ever puts in a window. */
+    if (entered) {
+      this.cost.set(path, entered.length);
+      this.surfacedEver.add(path);
+      trace("entered", { path, chars: entered.length, via: "read" });
+    }
   }
 
   private remember(path: string, text: string | undefined): void {
@@ -323,6 +336,7 @@ export class Surfacer {
      the only remaining reason a line is not the capsule text. */
   flush(): string | undefined {
     this.intent = [];
+    this.lastFlush.clear();
     if (!this.staged.size) return undefined;
     /* Addressed articles first, in the order they were touched, because the address is
        a certainty and nothing ranked should push it down the message. Retrieved ones
@@ -353,6 +367,7 @@ export class Surfacer {
       });
       this.seen.add(path);
       this.remember(path, entry.capsule);
+      this.lastFlush.set(path, entry);
       this.staged.delete(path);
     }
     const plural = lines.length > 1 ? "s" : "";
@@ -363,10 +378,29 @@ export class Surfacer {
     );
   }
 
+  /* Put back everything the last flush and settle committed. Both mark their work done
+     before the message is handed to pi, because the message is built from that work; if
+     the send then fails, the agent never saw the nudge and the state is a lie. Undoing
+     restages the lines and restores the reminders, so the next turn tries again. */
+  undoFlush(): void {
+    for (const [path, entry] of this.lastFlush) {
+      this.staged.set(path, entry);
+      this.seen.delete(path);
+      this.marks.delete(path);
+      this.cost.delete(path);
+      this.surfacedEver.delete(path);
+    }
+    this.lastFlush.clear();
+    for (const path of this.lastNudge) this.pendingUpdates.add(path);
+    this.lastNudge = [];
+    trace("delivery-undone", {});
+  }
+
   /* The write-after half of the doctrine: every governing article touched since its
      last update draws one reminder, then the slate clears for the next batch. */
   settleNudge(): string | undefined {
     const stale = [...this.pendingUpdates];
+    this.lastNudge = stale;
     this.pendingUpdates.clear();
     if (!stale.length) return undefined;
     trace("settle-nudge", { paths: stale });

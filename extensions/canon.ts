@@ -1,5 +1,6 @@
 /* pi-canon: canonical project memory for Pi. Wiring only; mechanics live in lib/. */
 
+import { appendFileSync } from "node:fs";
 import { basename, isAbsolute, join } from "node:path";
 import { buildRetriever, type RetrievalOption } from "./lib/retrieval.ts";
 import { CanonStore } from "./lib/store.ts";
@@ -108,14 +109,14 @@ export function registerPiCanon(pi: any, options: CanonOptions = {}): void {
     const { surfacer } = ready(ctx);
     surfacer.retrieve();
     const text = surfacer.flush();
-    if (text) deliver(pi, text, "steer");
+    if (text && !deliver(pi, text, "steer")) surfacer.undoFlush();
   });
 
   pi.on("agent_settled", (_event: unknown, ctx: any) => {
     if (!surface) return;
     const { surfacer } = ready(ctx);
     const text = [surfacer.flush(), surfacer.settleNudge()].filter(Boolean).join("\n");
-    if (text) deliver(pi, text, "nextTurn");
+    if (text && !deliver(pi, text, "nextTurn")) surfacer.undoFlush();
   });
 
   pi.registerCommand("pi-canon", {
@@ -133,10 +134,28 @@ export function registerPiCanon(pi: any, options: CanonOptions = {}): void {
   });
 }
 
-function deliver(pi: any, content: string, deliverAs: "steer" | "nextTurn"): void {
+/* Same env-gated sink as surfacing.ts; inert without PI_CANON_TRACE. */
+function trace(kind: string, data: Record<string, unknown>): void {
+  const file = process.env.PI_CANON_TRACE;
+  if (!file) return;
+  try {
+    appendFileSync(file, JSON.stringify({ at: new Date().toISOString(), kind, ...data }) + "\n");
+  } catch {
+    /* tracing must never break a turn */
+  }
+}
+
+/* Reports whether the message actually went, so a caller can decide whether to keep the
+   state that assumed it did. A lost nudge must never break the turn, but swallowing the
+   failure silently made a delivery fault indistinguishable from an agent that read the
+   nudge and ignored it (Codex, 2026-08-13), which is the difference between a bug and a
+   behaviour. */
+function deliver(pi: any, content: string, deliverAs: "steer" | "nextTurn"): boolean {
   try {
     pi.sendMessage({ customType: "pi-canon", content, display: false }, { deliverAs });
-  } catch {
-    /* a lost nudge must never break the turn */
+    return true;
+  } catch (error) {
+    trace("delivery-failed", { deliverAs, error: String(error) });
+    return false;
   }
 }
