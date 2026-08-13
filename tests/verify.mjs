@@ -557,6 +557,24 @@ assert.ok(second.length > 0 && second.length <= 3, `moved intent releases up to 
 assert.ok(!second.some((line) => fanned.includes(line)), "and repeats nothing already sent");
 pass("intent that moved releases the next ones, still capped");
 
+/* A message that was never delivered is restaged, and restaged lines are what the NEXT
+   message will carry, so they count against the cap. They did not: they were invisible to
+   the budget because the candidate filter skipped them, and four failed deliveries walked
+   a three-line cap up to twelve. */
+const surfUndone = new Surfacer([{ name: "", dir: fanDir, store: fanStore }], new LexicalRetriever());
+surfUndone.noteIntent("shell", { command: "reconciliation rounding rule" });
+surfUndone.retrieve();
+const before = surfUndone.flush().split("\n").filter((l) => l.startsWith("policy/")).length;
+assert.equal(before, 3);
+for (let turn = 0; turn < 3; turn += 1) {
+  surfUndone.undoFlush();
+  surfUndone.noteIntent("shell", { command: `reconciliation rounding rule variant ${turn}` });
+  surfUndone.retrieve();
+  const lines = surfUndone.flush().split("\n").filter((l) => l.startsWith("policy/")).length;
+  assert.equal(lines, 3, `an undelivered message must not grow the next one: turn ${turn} carried ${lines}`);
+}
+pass("an undelivered message is retried at the same size, never a larger one");
+
 /* Intent is this turn's, and it is evidence-free: a tool RESULT never reaches the
    query. pi-fold measured a window carrying 29,244 characters of tool output against
    125 of intent, and every retrieval number it produced was that one defect. */

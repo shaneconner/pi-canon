@@ -325,7 +325,17 @@ export class Surfacer {
       .filter((entry) => typeof entry.score === "number" && entry.score > 0)
       .filter((entry) => !this.seen.has(entry.candidate.path) && !this.staged.has(entry.candidate.path))
       .sort((a, b) => (b.score as number) - (a.score as number));
-    for (const { candidate, score } of ranked.slice(0, RETRIEVED_PER_TURN)) {
+    /* What is already staged counts against the cap.
+
+       undoFlush restages an undelivered message, and restaged entries are excluded from
+       the candidate pool by the `staged` check above, so they were invisible to the budget
+       and the next turn added a full three on top of them: three, six, nine, twelve ranked
+       lines over four failed deliveries (workflow review, 2026-08-13). The cap is on what
+       one message carries, so it has to count everything that message will carry, not just
+       what this call contributed. */
+    const already = [...this.staged.values()].filter((entry) => entry.score !== undefined).length;
+    const room = Math.max(0, RETRIEVED_PER_TURN - already);
+    for (const { candidate, score } of ranked.slice(0, room)) {
       this.staged.set(candidate.path, {
         capsule: candidate.capsule,
         stamp: candidate.updated ? ` (updated ${candidate.updated})` : "",
@@ -340,14 +350,14 @@ export class Surfacer {
         declared: candidate.declared,
       });
     }
-    const held = ranked.slice(RETRIEVED_PER_TURN);
+    const held = ranked.slice(room);
     if (held.length) {
       trace("retrieval-held", {
         count: held.length,
         /* The best score that did NOT ride this turn, against the worst that did: the
            pair that says whether the cap ever cut anything worth carrying. */
         bestHeld: held[0].score,
-        worstSent: ranked[RETRIEVED_PER_TURN - 1].score,
+        worstSent: room ? ranked[room - 1].score : null,
       });
     }
   }
