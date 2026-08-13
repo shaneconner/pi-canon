@@ -13,7 +13,7 @@ const projectRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const jiti = createJiti(import.meta.url);
 
 const { CanonStore, normalize } = await jiti.import(join(projectRoot, "extensions/lib/store.ts"));
-const { advise, unretained, BODY_WARN_CHARS, BODY_LARGE_CHARS, CAPSULE_CHARS } = await jiti.import(join(projectRoot, "extensions/lib/lint.ts"));
+const { advise, unapplied, unretained, BODY_WARN_CHARS, BODY_LARGE_CHARS, CAPSULE_CHARS } = await jiti.import(join(projectRoot, "extensions/lib/lint.ts"));
 const { Surfacer } = await jiti.import(join(projectRoot, "extensions/lib/surfacing.ts"));
 const { buildRetriever, governsAnAsset, intentQuery, LexicalRetriever, residue, RULE_SCOPE, userIntent } =
   await jiti.import(join(projectRoot, "extensions/lib/retrieval.ts"));
@@ -1096,5 +1096,30 @@ assert.deepEqual(unretained(SOURCE, undefined), [], "no article is not a retenti
 assert.deepEqual(unretained("Renamed the helper and tidied imports.", thin), [],
   "prose with no values in it reports nothing");
 pass("the value check stays silent with no article and with no values");
+
+/* --- the apply check ------------------------------------------------------------
+   e2e3: a canon plant's first pass at the code was right 4 times in 9 while a bare
+   plant's was right 14 in 14, and every canon plant that came back to the file got it
+   right. The article was never the problem. What was missing was a reason to look
+   back at the asset once the rule was written down. */
+const applyDir = join(work, "apply");
+mkdirSync(join(applyDir, "ops"), { recursive: true });
+writeFileSync(join(applyDir, "ops/billing.py"), "# emitter\n");
+const applyStore = new CanonStore(join(applyDir, ".canon"));
+
+const governing = applyStore.write("ops/billing", {
+  capsule: "c", body: "The nightly close must use the system: prefix.",
+});
+assert.equal(unapplied(governing, applyDir), true);
+pass("an article stating a rule over an asset on disk asks to be checked against it");
+
+const noRule = applyStore.write("ops/audit", { capsule: "c", body: "Appends rows to the sink." });
+assert.equal(unapplied(noRule, applyDir), false, "an article carrying no rule has nothing to check");
+const noAsset = applyStore.write("policy/actors", {
+  capsule: "c", body: "Scheduled jobs must carry a registered id.",
+});
+assert.equal(unapplied(noAsset, applyDir), false, "a rule governing no file has nothing to re-read");
+assert.equal(unapplied(undefined, applyDir), false);
+pass("the apply check stays silent without a rule, without an asset, and without an article");
 
 console.log(`\nall ${gates} gates green`);

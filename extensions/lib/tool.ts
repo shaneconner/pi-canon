@@ -2,7 +2,7 @@
    for events; map to orient. */
 
 import { basename } from "node:path";
-import { advise, unretained } from "./lint.ts";
+import { advise, unapplied, unretained } from "./lint.ts";
 import { normalize, type CanonStore } from "./store.ts";
 import type { Mount, Surfacer } from "./surfacing.ts";
 
@@ -186,12 +186,14 @@ function run(runtime: CanonRuntime, params: Record<string, unknown>): string {
          quarter of them, and cap1 measured an article without its values scoring exactly
          what no article scores. */
       const missed: string[] = [];
+      const govern: string[] = [];
       for (const address of subject ?? []) {
         const routed = route(runtime, address);
         const governing = routed.mount.store.read(routed.path);
         for (const value of unretained(body, governing)) {
           missed.push(`${routed.path} is missing ${value}`);
         }
+        if (unapplied(governing, routed.mount.dir)) govern.push(routed.path);
       }
       return [
         `Logged ${basename(file)}.`,
@@ -200,6 +202,13 @@ function run(runtime: CanonRuntime, params: Record<string, unknown>): string {
               `This entry records values its article does not carry: ${missed.slice(0, 6).join("; ")}. ` +
                 "The article is what surfaces on a touch; the journal is not. If those values " +
                 "matter beyond this event, put them in the article verbatim.",
+            ]
+          : []),
+        ...(govern.length
+          ? [
+              `${govern.slice(0, 3).join(", ")} now states a rule. Re-read what it governs and ` +
+                "confirm the code does what the article says: recording a rule and applying it " +
+                "are separate acts, and this is the moment the rule is in hand.",
             ]
           : []),
       ].join("\n");

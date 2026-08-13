@@ -71,6 +71,22 @@ export function unretained(journalBody: string, article: Article | undefined): s
     .slice(0, VALUE_CAP);
 }
 
+/* The rule is recorded; the asset it governs may not obey it yet.
+
+   e2e3 measured a canon plant's FIRST pass at the code at 4 of 9 against a bare plant's
+   14 of 14, and every canon plant that came back to the file got it right, 6 of 6. The
+   article was not the problem: all fifteen carried the rule in full, and the wrong code
+   was written before any of them existed. What the session lacked was a reason to look
+   back at the asset after writing down what governs it.
+
+   The write-then-journal loop already produces that second pass when it happens at all.
+   This asks for it, at the one moment both the rule and the address it governs are in
+   hand. Only for an address that governs something on disk: an article about a rule with
+   no asset has nothing to re-read. */
+export function unapplied(article: Article | undefined, dir: string): boolean {
+  return Boolean(article) && CONSTRAINT.test(article!.body) && governsAnAsset(dir, article!.path);
+}
+
 export function advise(
   article: Article,
   store: CanonStore,
