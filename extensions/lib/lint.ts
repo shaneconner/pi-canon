@@ -90,16 +90,16 @@ export function unretained(journalBody: string, article: Article | undefined): s
 
 /* The rule is recorded; the asset it governs may not obey it yet.
 
-   e2e3 measured a canon plant's FIRST pass at the code at 4 of 9 against a bare plant's
-   14 of 14, and every canon plant that came back to the file got it right, 6 of 6. The
-   article was not the problem: all fifteen carried the rule in full, and the wrong code
-   was written before any of them existed. What the session lacked was a reason to look
-   back at the asset after writing down what governs it.
+   Grading the first edit rather than the end state, e2e3 put a canon plant's first pass
+   at 5 of 15 against a bare plant's 15 of 15, with 5 of the 10 wrong ones later repaired.
+   That is an exploratory association, not an established cause: the tool schema and the
+   session orientation are in the window before any edit, so this asks for a second look
+   without claiming to know what made the first one worse.
 
-   The write-then-journal loop already produces that second pass when it happens at all.
-   This asks for it, at the one moment both the rule and the address it governs are in
-   hand. Only for an address that governs something on disk: an article about a rule with
-   no asset has nothing to re-read. */
+   Only for an address that governs something on disk, because an article about a rule
+   with no asset has nothing to re-read. The trigger is a keyword test on the article
+   body, which is weak in both directions and known to be: it fires on any journal entry
+   under a rule-bearing article, and it misses rules phrased without one of its words. */
 export function unapplied(article: Article | undefined, dir: string): boolean {
   return Boolean(article) && CONSTRAINT.test(article!.body) && governsAnAsset(dir, article!.path);
 }

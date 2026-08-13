@@ -1149,10 +1149,10 @@ assert.deepEqual(unretained("Renamed the helper and tidied imports.", thin), [],
 pass("the value check stays silent with no article and with no values");
 
 /* --- the apply check ------------------------------------------------------------
-   e2e3: a canon plant's first pass at the code was right 4 times in 9 while a bare
-   plant's was right 14 in 14, and every canon plant that came back to the file got it
-   right. The article was never the problem. What was missing was a reason to look
-   back at the asset once the rule was written down. */
+   e2e3, grading the first edit rather than the end state: a canon plant's first pass was
+   right 5 times in 15 against a bare plant's 15 in 15, and 5 of the 10 wrong ones were
+   later repaired. Exploratory only. These gates fix the predicate's shape, not a claim
+   about why the first pass is worse. */
 const applyDir = join(work, "apply");
 mkdirSync(join(applyDir, "ops"), { recursive: true });
 writeFileSync(join(applyDir, "ops/billing.py"), "# emitter\n");
