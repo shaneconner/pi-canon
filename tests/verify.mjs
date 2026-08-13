@@ -15,7 +15,7 @@ const jiti = createJiti(import.meta.url);
 const { CanonStore, normalize } = await jiti.import(join(projectRoot, "extensions/lib/store.ts"));
 const { advise, unretained, BODY_WARN_CHARS, BODY_LARGE_CHARS, CAPSULE_CHARS } = await jiti.import(join(projectRoot, "extensions/lib/lint.ts"));
 const { Surfacer } = await jiti.import(join(projectRoot, "extensions/lib/surfacing.ts"));
-const { buildRetriever, governsAnAsset, intentQuery, LexicalRetriever, residue, userIntent } =
+const { buildRetriever, governsAnAsset, intentQuery, LexicalRetriever, residue, RULE_SCOPE, userIntent } =
   await jiti.import(join(projectRoot, "extensions/lib/retrieval.ts"));
 const { registerPiCanon } = await jiti.import(join(projectRoot, "extensions/canon.ts"));
 
@@ -315,6 +315,54 @@ surfRead.observe([{ role: "user", content: "that result got folded" }]);
 surfRead.collect([join(projDir, "src/feed/sync.ts")]);
 assert.match(surfRead.flush(), /src\/feed\/sync/, "and re-surfaces once the result is gone");
 pass("a pi_canon read establishes presence and expires with its own tool result");
+
+/* The case presence exists to catch, and the case a capsule mark got wrong. An article
+   read in full carries the rule in its BODY; the capsule is also the text of the
+   one-line surfaced nudge, so marking on the capsule kept the article "present" on the
+   strength of a line that never held the rule. Marking on what actually entered the
+   window makes a folded body an absence, which is what it is. */
+const CAPSULE_THIN = "Audit actors follow the scheduler convention for this service.";
+const BODY_RULE =
+  "An actor counts as automated only when it reads system: followed by an id the " +
+  "scheduler registered. The registered jobs are billing-close, inventory-reconcile " +
+  "and nightly-dispatch, and an unregistered id lands on a named person.";
+store.write("src/audit/actor", { capsule: CAPSULE_THIN, body: BODY_RULE });
+mkdirSync(join(projDir, "src/audit"), { recursive: true });
+writeFileSync(join(projDir, "src/audit/actor.ts"), "export const a = 4;\n");
+
+const surfBody = new Surfacer([{ name: "", dir: projDir, store }]);
+surfBody.collect([join(projDir, "src/audit/actor.ts")]);
+surfBody.markSeen("src/audit/actor", `${CAPSULE_THIN}\n${BODY_RULE}`);
+surfBody.observe([{ role: "toolResult", content: `capsule: ${CAPSULE_THIN}\n\n${BODY_RULE}` }]);
+assert.equal(surfBody.stats.present, 1, "present while the body it delivered is live");
+
+/* The capsule survives; the body does not. The old mark read this as present. */
+surfBody.observe([{ role: "user", content: `[pi-canon] src/audit/actor: ${CAPSULE_THIN}` }]);
+assert.equal(surfBody.stats.present, 0, "a surviving capsule is not a surviving article");
+surfBody.collect([join(projDir, "src/audit/actor.ts")]);
+assert.match(surfBody.flush(), /src\/audit\/actor/);
+pass("an article whose body folded away is absent even when its capsule survives");
+
+/* A body is prose, so it has line breaks in it, and the projection arrives through
+   JSON.stringify where a break is the two characters \ and n. Both sides have to agree
+   across one or the mark never matches and the article re-surfaces on every touch. */
+const BODY_PARAS = `Actors are checked in two steps.
+
+First the prefix: an actor is automated only when it reads system: followed by an id.
+
+Then the registry: billing-close, inventory-reconcile and nightly-dispatch are the
+registered jobs, and anything else lands on a named person.`;
+store.write("src/audit/paras", { capsule: CAPSULE_THIN, body: BODY_PARAS });
+writeFileSync(join(projDir, "src/audit/paras.ts"), "export const p = 5;\n");
+
+const surfParas = new Surfacer([{ name: "", dir: projDir, store }]);
+surfParas.collect([join(projDir, "src/audit/paras.ts")]);
+surfParas.markSeen("src/audit/paras", `${CAPSULE_THIN}\n${BODY_PARAS}`);
+surfParas.observe([{ role: "toolResult", content: `capsule: ${CAPSULE_THIN}\n\n${BODY_PARAS}` }]);
+assert.equal(surfParas.stats.present, 1, "a multi-paragraph body is present while it is live");
+surfParas.collect([join(projDir, "src/audit/paras.ts")]);
+assert.equal(surfParas.flush(), undefined, "and is not re-surfaced under the agent");
+pass("a mark spanning a line break still matches the JSON-escaped projection");
 
 /* Never observing is exactly 1.0: nothing expires, so a harness with no projection
    loses the mechanism and nothing else. Neither is a non-array or unserializable one
@@ -976,6 +1024,38 @@ assert.equal(
   0,
 );
 pass("the scope question is asked once, and never of an article already off the asset path");
+
+/* --- the declared scope ----------------------------------------------------------
+   The complement. An article off the asset path is where the doctrine wanted it, and
+   is also exactly what an article whose asset was deleted under it looks like. The
+   residue could not tell those apart while it was defined only by what it is not. */
+assert.ok(
+  advise(offPath, scopeStore, "", { dir: scopeDir, retrieval: "lexical" })
+    .some((a) => a.includes("governs no asset on disk") && a.includes("scope rule")),
+);
+const declared = scopeStore.write("policy/audit-actor", { body: RULE_BODY, scope: RULE_SCOPE });
+assert.equal(declared.scope, RULE_SCOPE);
+assert.equal(scopeStore.read("policy/audit-actor").scope, RULE_SCOPE, "and survives a round trip");
+assert.equal(
+  advise(declared, scopeStore, "", { dir: scopeDir, retrieval: "lexical" })
+    .filter((a) => a.includes("governs no asset on disk")).length,
+  0,
+  "an article that declared itself is not asked again",
+);
+pass("an off-path rule is asked to declare itself, and stops being asked once it has");
+
+/* Membership is unchanged: a declaration the agent forgot must never cost it the one
+   mechanism that can reach it. The flag reports, it does not filter. */
+scopeStore.write("policy/timezones", { capsule: "c", body: "Timestamps are UTC." });
+const scoped = residue(scopeStore, scopeDir);
+assert.deepEqual(
+  scoped.filter((c) => c.declared).map((c) => c.path), ["policy/audit-actor"],
+);
+assert.ok(
+  scoped.some((c) => c.path === "policy/timezones" && !c.declared),
+  "an undeclared off-path article is still ranked, just not counted as deliberate",
+);
+pass("the residue reports which of its articles are rules on purpose without filtering on it");
 
 /* --- values must survive distillation --------------------------------------------
    capbase, 8 plant sessions: the journal held every declared value 48/48 and the

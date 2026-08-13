@@ -62,6 +62,13 @@ export function buildCanonTool(ready: (ctx: unknown) => CanonRuntime, retrieval 
             "limits, what breaks). journal: the event text, source details intact.",
         },
         capsule: { type: "string", description: "write: one dense line injected when the asset is touched." },
+        scope: {
+          type: "string",
+          enum: ["rule"],
+          description:
+            "write: set to 'rule' when this article names a cross-cutting rule instead of " +
+            "governing an asset, so it is a rule on purpose rather than an article whose asset went missing.",
+        },
         subject: {
           type: "array",
           items: { type: "string" },
@@ -104,7 +111,8 @@ function filingTail(retrieval: string): string {
     "naming the rule rather than any asset, because the only parent unrelated packages share " +
     "is the root and a root article surfaces on every touch of anything. Those articles are " +
     "reached by relevance to the work rather than by address, so give them a capsule that " +
-    "reads like the situation it governs."
+    "reads like the situation it governs, and write them with scope rule so a rule on purpose " +
+    "is not mistaken for an article whose asset went missing."
   );
 }
 
@@ -122,9 +130,10 @@ function run(runtime: CanonRuntime, params: Record<string, unknown>): string {
       if (!article) {
         return `No article governs ${path}. If you are working on this asset, create its article with write after the task.`;
       }
-      /* The capsule is the mark: this result carries it below, so presence can be
-         tested against the same string whichever way the article entered the window. */
-      surfacer.markSeen(qualify(article.path), article.capsule);
+      /* Everything this result is about to put in the window, so presence is tested
+         against the body it delivered rather than the capsule it happens to share with
+         a one-line surfaced nudge. An article whose body folds away is not present. */
+      surfacer.markSeen(qualify(article.path), `${article.capsule}\n${article.body}`);
       const title = article.path === path ? qualify(article.path) : `${qualify(article.path)} governs ${qualify(path)}`;
       const head = [
         article.capsule ? `capsule: ${article.capsule}` : "",
@@ -147,6 +156,7 @@ function run(runtime: CanonRuntime, params: Record<string, unknown>): string {
       const article = store.write(path, {
         capsule: params.capsule ? String(params.capsule) : undefined,
         body: params.body ? String(params.body) : undefined,
+        scope: params.scope ? String(params.scope) : undefined,
       });
       surfacer.markUpdated(qualify(article.path));
       return [

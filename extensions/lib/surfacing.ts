@@ -40,16 +40,32 @@ const PATHLIKE = /(?:^|[\s"'`=:,([{])(\/?[\w.@-]+(?:\/[\w.@-]+)+)/g;
    A mark is a normalized slice of what the article put in the window. Normalizing
    both sides to lowercase alphanumerics survives JSON escaping, whitespace
    rewrapping, and quoting differences between however the projection is rendered and
-   however we wrote it. The capsule is the mark because it is the one string that
-   appears whichever way the article entered: our surfaced line carries it, and a
-   pi_canon read prints it as `capsule: ...`. A short capsule is not distinctive
-   enough to test, so it is never expired; failing to expire only costs a re-surface
-   that does not happen, while a false expiry would spam the window. */
+   however we wrote it. A short mark is not distinctive enough to test, so it is never
+   expired; failing to expire only costs a re-surface that does not happen, while a
+   false expiry would spam the window.
+
+   The mark is the TAIL of whatever actually entered the window, and the caller passes
+   the whole of it. This corrects a real defect (Codex, 2026-08-12): the capsule used
+   to be the mark for both paths, so an article read in full stayed "present" on the
+   strength of its surviving capsule line while the body that held the rule had been
+   folded away, which is the one case presence exists to catch. A surfaced line is its
+   capsule and marks on the capsule; a read is capsule plus body and marks on the body.
+   The tail rather than the head because the two ways content leaves a window are not
+   symmetric: a fold takes the whole message, and a truncation takes the end first, so
+   a head mark survives exactly the loss it should report. */
 const MARK_CHARS = 120;
 const MARK_MINIMUM = 24;
 
+/* Escaped whitespace first, then the normal pass. A projection is read through
+   JSON.stringify, which renders a newline as the two characters \ and n, and n is a
+   letter: dropping only non-alphanumerics leaves a stray "n" token exactly where the
+   article had a line break, so the two sides stop agreeing at every boundary a break
+   crosses. Invisible while marks came from single-line capsules. The moment a mark is
+   drawn from a body it decides the mechanism, and in the direction that spams: a mark
+   that can never match is an article that is never present and re-surfaces on every
+   touch. Applied to both sides, so it corrects rather than tilts. */
 function fingerprint(text: string): string {
-  return text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  return text.replace(/\\[nrt]/g, " ").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
 /* A store and the directory whose assets it governs. The project is the first,
@@ -65,7 +81,7 @@ export class Surfacer {
   private mounts: Mount[];
   private seen = new Set<string>();
   /* What to look for in the projection to decide an article is still visible. Absent
-     for an article whose capsule is too short to test, which is never expired. */
+     for an article whose entered text is too short to test, which is never expired. */
   private marks = new Map<string, string>();
   private pendingUpdates = new Set<string>();
   private staged = new Map<string, { capsule: string; stamp: string; asset: string; score?: number }>();
@@ -102,16 +118,19 @@ export class Surfacer {
     return this.project;
   }
 
-  markSeen(path: string, mark?: string): void {
+  /* `entered` is everything the caller just put in the window for this article, not a
+     mark: the tail of it becomes the mark, so a caller that sent the body is held to
+     the body and one that sent only a capsule is held to the capsule. */
+  markSeen(path: string, entered?: string): void {
     if (this.staged.has(path)) trace("withdrawn", { path });
     this.seen.add(path);
-    this.remember(path, mark);
+    this.remember(path, entered);
     this.staged.delete(path);
   }
 
   private remember(path: string, text: string | undefined): void {
     const print = fingerprint(text ?? "");
-    if (print.length >= MARK_MINIMUM) this.marks.set(path, print.slice(0, MARK_CHARS));
+    if (print.length >= MARK_MINIMUM) this.marks.set(path, print.slice(-MARK_CHARS));
     else this.marks.delete(path);
   }
 
@@ -242,7 +261,13 @@ export class Surfacer {
         asset: candidate.path,
         score,
       });
-      trace("retrieved", { path: candidate.path, retriever: this.retriever.name, score });
+      trace("retrieved", {
+        path: candidate.path,
+        retriever: this.retriever.name,
+        score,
+        /* So a run can report how much of what it ranked was a rule on purpose. */
+        declared: candidate.declared,
+      });
     }
   }
 
