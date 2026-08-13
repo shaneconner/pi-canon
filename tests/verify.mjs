@@ -364,6 +364,18 @@ surfParas.collect([join(projDir, "src/audit/paras.ts")]);
 assert.equal(surfParas.flush(), undefined, "and is not re-surfaced under the agent");
 pass("a mark spanning a line break still matches the JSON-escaped projection");
 
+/* Writing an article is not a licence to stop checking. markUpdated used to assert
+   presence with no evidence, which cleared the mark, and observe() skips a seen path
+   that has no mark: the article then stayed present for the whole session and could
+   never re-surface however much folded away. */
+const surfWrote = new Surfacer([{ name: "", dir: projDir, store }]);
+surfWrote.markUpdated("src/feed/sync", `${CAPSULE_PRESENT}\nthe body the agent just wrote`);
+surfWrote.observe([{ role: "user", content: "unrelated turn; the write is long gone" }]);
+assert.equal(surfWrote.stats.present, 0, "a written article expires like any other");
+surfWrote.collect([join(projDir, "src/feed/sync.ts")]);
+assert.match(surfWrote.flush(), /src\/feed\/sync/, "and re-surfaces on the next touch");
+pass("an article that was written expires from the window like one that was read");
+
 /* Never observing is exactly 1.0: nothing expires, so a harness with no projection
    loses the mechanism and nothing else. Neither is a non-array or unserializable one
    evidence of absence. */

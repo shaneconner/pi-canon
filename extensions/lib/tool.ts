@@ -158,7 +158,12 @@ function run(runtime: CanonRuntime, params: Record<string, unknown>): string {
         body: params.body ? String(params.body) : undefined,
         scope: params.scope ? String(params.scope) : undefined,
       });
-      surfacer.markUpdated(qualify(article.path));
+      /* What this write put in the window, which is what the agent supplied, not the
+         merged article: a capsule-only write does not deliver the stored body. */
+      surfacer.markUpdated(
+        qualify(article.path),
+        [params.capsule, params.body].filter(Boolean).map(String).join("\n"),
+      );
       return [
         `Wrote ${qualify(article.path)}.`,
         ...advise(article, store, priorBody, { dir: mount.dir, retrieval: runtime.retrieval }),

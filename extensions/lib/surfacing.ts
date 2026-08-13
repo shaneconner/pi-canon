@@ -169,8 +169,15 @@ export class Surfacer {
     }
   }
 
-  markUpdated(path: string): void {
-    this.markSeen(path);
+  /* Authoring an article is a way of having it in the window, so it takes `entered`
+     for the same reason a read does. Passing nothing here was a real bug (Codex,
+     2026-08-13): the mark was cleared, observe() skips a seen path with no mark, and the
+     article then stayed present for the rest of the session and could never re-surface.
+     Only what the write itself carried counts: a capsule-only write leaves the stored
+     body unseen, so marking the whole article present would be a claim about text the
+     agent never received. */
+  markUpdated(path: string, entered?: string): void {
+    this.markSeen(path, entered);
     this.pendingUpdates.delete(path);
   }
 
