@@ -1,9 +1,10 @@
 /* The pi_canon tool: one tool, four verbs. Read and update over create; the journal
    for events; map to orient. */
 
-import { basename } from "node:path";
+import { existsSync } from "node:fs";
+import { basename, join } from "node:path";
 import { advise, unapplied, unretained } from "./lint.ts";
-import { normalize, type CanonStore } from "./store.ts";
+import { contained, normalize, type CanonStore } from "./store.ts";
 import type { Mount, Surfacer } from "./surfacing.ts";
 
 export interface CanonRuntime {
@@ -20,15 +21,28 @@ function route(runtime: CanonRuntime, raw: string): { mount: Mount; path: string
   const qualified = /^([\w.-]+):(.*)$/.exec(raw);
   if (qualified) {
     const mount = runtime.mounts.find((m) => m.name === qualified[1]);
-    if (mount) return { mount, path: normalize(qualified[2], mount.dir) };
+    if (mount) return { mount, path: settle(mount, qualified[2], mount.dir) };
   }
   const slashed = raw.replace(/\\/g, "/");
   for (const mount of runtime.mounts) {
     if (mount.name && (slashed === mount.dir || slashed.startsWith(`${mount.dir}/`))) {
-      return { mount, path: normalize(slashed, mount.dir) };
+      return { mount, path: settle(mount, slashed, mount.dir) };
     }
   }
-  return { mount: runtime.mounts[0], path: normalize(raw, runtime.cwd) };
+  return { mount: runtime.mounts[0], path: settle(runtime.mounts[0], raw, runtime.cwd) };
+}
+
+/* An address that already names an article wins over canonicalising it a second time.
+   normalize drops one extension at the asset boundary, so the article governing
+   src/core/config.test.ts lives at src/core/config.test, which is the address map
+   prints. Feeding that address back to read used to normalize again down to
+   src/core/config and silently return a DIFFERENT article whenever the parent existed
+   (Sol Pro, 2026-08-13). An asset on disk still wins, so a real file named config.test
+   is not mistaken for the canonical address of config.test.ts. */
+function settle(mount: Mount, raw: string, cwd: string): string {
+  const exact = contained(raw, cwd);
+  if (exact && !existsSync(join(mount.dir, exact)) && mount.store.read(exact)) return exact;
+  return normalize(raw, cwd);
 }
 
 export function buildCanonTool(ready: (ctx: unknown) => CanonRuntime, retrieval = "none") {
@@ -126,7 +140,11 @@ function run(runtime: CanonRuntime, params: Record<string, unknown>): string {
   switch (action) {
     case "read": {
       if (!path) return "read needs a path.";
-      const article = store.resolve(path);
+      /* Exact address first, ancestors only if nothing governs it directly. resolve()
+         normalizes what it is given, and route has already produced a canonical
+         address, so handing it straight to resolve drops a second extension and
+         answers src/core/config.test with src/core/config. */
+      const article = store.read(path) ?? store.resolve(path);
       if (!article) {
         return `No article governs ${path}. If you are working on this asset, create its article with write after the task.`;
       }
@@ -196,9 +214,9 @@ function run(runtime: CanonRuntime, params: Record<string, unknown>): string {
         const routed = route(runtime, address);
         const governing = routed.mount.store.read(routed.path);
         for (const value of unretained(body, governing)) {
-          missed.push(`${routed.path} is missing ${value}`);
+          missed.push(`${address} is missing ${value}`);
         }
-        if (unapplied(governing, routed.mount.dir)) govern.push(routed.path);
+        if (unapplied(governing, routed.mount.dir)) govern.push(address);
       }
       return [
         `Logged ${basename(file)}.`,

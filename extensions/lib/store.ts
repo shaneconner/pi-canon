@@ -33,6 +33,16 @@ function contain(path: string): string {
   return parts.join("/");
 }
 
+/* The same address with nothing dropped. Needed to tell an asset path from an address
+   that is already canonical: normalize drops one extension, so putting the article
+   address src/core/config.test back through it yields src/core/config, a different
+   article. Callers that accept an address from an agent must not canonicalise twice. */
+export function contained(path: string, cwd = ""): string {
+  let out = path.trim().replace(/\\/g, "/");
+  if (cwd && (out === cwd || out.startsWith(`${cwd}/`))) out = out.slice(cwd.length);
+  return contain(out);
+}
+
 /* An asset address: relative to the project, contained, file extension dropped so
    src/core/config.ts shares its article's address. The drop happens once, here at
    the boundary; the store itself never drops again, or config.test would lose its

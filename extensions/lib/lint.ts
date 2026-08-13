@@ -65,8 +65,25 @@ function valuesIn(text: string): string[] {
 export function unretained(journalBody: string, article: Article | undefined): string[] {
   if (!article) return [];
   const kept = `${article.capsule} ${article.body}`.toLowerCase().replace(/\s+/g, " ");
+  /* Bounded containment, not bare substring: a journal value of 42 must not count as
+     kept because the article happens to say 142, which is the failure mode a guard
+     about exact values can least afford. A value may still sit inside a larger
+     identifier at a symbol boundary, so billing-close counts inside
+     system:billing-close. */
+  const holds = (value: string): boolean => {
+    const needle = value.toLowerCase().replace(/\s+/g, " ");
+    let from = 0;
+    for (;;) {
+      const at = kept.indexOf(needle, from);
+      if (at === -1) return false;
+      const before = kept[at - 1] ?? " ";
+      const after = kept[at + needle.length] ?? " ";
+      if (!/[a-z0-9]/.test(before) && !/[a-z0-9]/.test(after)) return true;
+      from = at + 1;
+    }
+  };
   return valuesIn(journalBody)
-    .filter((value) => !kept.includes(value.toLowerCase().replace(/\s+/g, " ")))
+    .filter((value) => !holds(value))
     .sort((a, b) => b.length - a.length)
     .slice(0, VALUE_CAP);
 }

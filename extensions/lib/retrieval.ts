@@ -293,17 +293,22 @@ export function buildRetriever(option: RetrievalOption | undefined): Retriever {
 export function residue(store: CanonStore, dir: string): Candidate[] {
   const out: Candidate[] = [];
   for (const path of store.list()) {
-    if (governsAnAsset(dir, path)) continue;
     const article = store.read(path);
-    if (article) {
-      out.push({
-        path,
-        capsule: article.capsule,
-        body: article.body,
-        updated: article.updated,
-        declared: article.scope === RULE_SCOPE,
-      });
-    }
+    if (!article) continue;
+    /* Declared first, so a rule stays reachable even if a file later appears at its
+       address. Membership was decided by the filesystem alone, which meant a
+       deliberate cross-cutting rule silently dropped out of the only mechanism that
+       reaches it the moment something coincided with its name (Sol Pro, 2026-08-13).
+       Undeclared and off the asset path still qualifies, so forgetting the flag stays
+       fail-open. */
+    if (article.scope !== RULE_SCOPE && governsAnAsset(dir, path)) continue;
+    out.push({
+      path,
+      capsule: article.capsule,
+      body: article.body,
+      updated: article.updated,
+      declared: article.scope === RULE_SCOPE,
+    });
   }
   return out;
 }

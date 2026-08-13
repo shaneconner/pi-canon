@@ -644,6 +644,24 @@ assert.equal(store.read("src/core/config.test").body.trim(), "Test notes.");
 assert.equal(store.read("src/core/config").body.trim(), "Current truth about config loading.");
 pass("writing config.test.ts lands beside config, never on top of it");
 
+/* And the address it landed at has to survive being handed back. map prints
+   src/core/config.test; normalizing that a second time drops .test and reads
+   src/core/config, which exists, so the tool returned a DIFFERENT article and said
+   nothing (Sol Pro, 2026-08-13). Reading through the tool is the only way to catch
+   this: the store never sees the second normalize. */
+const roundTrip = await tools[0].execute(
+  "id", { action: "read", path: "src/core/config.test" }, undefined, undefined, ctx,
+);
+assert.match(roundTrip.content[0].text, /Test notes\./, "the dotted address reads its own article");
+assert.ok(!roundTrip.content[0].text.includes("Current truth about config loading"),
+  "and never silently answers with its parent");
+/* The asset path still canonicalises, and a real file wins over a look-alike address. */
+const viaAsset = await tools[0].execute(
+  "id", { action: "read", path: "src/core/config.ts" }, undefined, undefined, ctx,
+);
+assert.match(viaAsset.content[0].text, /Current truth about config loading/);
+pass("a canonical dotted address round-trips through the tool instead of collapsing to its parent");
+
 await tools[0].execute("id", { action: "write", path: "src/newthing", body: "", capsule: "" }, undefined, undefined, ctx);
 assert.equal(store.read("src/newthing").body.trim(), "New.");
 pass("an empty-string body or capsule leaves stored content untouched");
@@ -1067,7 +1085,16 @@ assert.ok(
   scoped.some((c) => c.path === "policy/timezones" && !c.declared),
   "an undeclared off-path article is still ranked, just not counted as deliberate",
 );
-pass("the residue reports which of its articles are rules on purpose without filtering on it");
+pass("the residue reports which of its articles are rules on purpose");
+
+/* And a declaration has to survive the filesystem. Membership used to be decided by
+   governsAnAsset alone, so the moment anything appeared at a declared rule's address
+   the rule dropped out of the only mechanism that can reach it, silently. */
+writeFileSync(join(scopeDir, "policy"), "not a directory, just a name collision\n");
+const collided = residue(scopeStore, scopeDir);
+assert.ok(collided.some((c) => c.path === "policy/audit-actor" && c.declared),
+  "a declared rule stays retrievable when something collides with its address");
+pass("a declared rule survives an asset appearing at its address");
 
 /* --- values must survive distillation --------------------------------------------
    capbase, 8 plant sessions: the journal held every declared value 48/48 and the
@@ -1103,6 +1130,18 @@ const fat = valStore.write("ops/billing", {
 });
 assert.deepEqual(unretained(SOURCE, fat), [], "an article carrying the values draws nothing");
 pass("an article that kept its values is not nagged");
+
+/* Bare substring containment would call 42 retained because the article says 142,
+   which is the one mistake a guard about exact values cannot make. A value sitting at
+   a symbol boundary inside a larger identifier is still retained. */
+const numeric = store.write("src/numeric", {
+  capsule: "Limits.",
+  body: "The cap is 142 and the actor is system:billing-close.",
+});
+assert.deepEqual(unretained("Raised it to 42 today.", numeric), ["42"],
+  "42 is not retained by an article that only says 142");
+assert.deepEqual(unretained("The job is billing-close.", numeric), [],
+  "billing-close is retained inside system:billing-close");
 
 assert.deepEqual(unretained(SOURCE, undefined), [], "no article is not a retention failure");
 assert.deepEqual(unretained("Renamed the helper and tidied imports.", thin), [],
