@@ -67,6 +67,9 @@ const INTENT_ARGUMENT_CHARS = 200;
    number either package has on this: same window, oldest half MRR 0.0485 with 4 targets
    in the top 5, newest half 0.1071 with 10. */
 const USER_INTENT_CHARS = 1500;
+/* What stands in for the middle of a message too long to carry whole. Visible on purpose:
+   a query built from two ends of a message should read as such. */
+const ELISION = "\n...\n";
 
 export interface IntentTurn {
   role?: unknown;
@@ -109,12 +112,22 @@ export function userIntent(messages: unknown): IntentTurn[] {
     if (message.customType === "pi-canon") continue;
     const text = messageText(message.content).trim();
     if (!text || text.startsWith("[pi-canon]")) continue;
-    /* The TAIL of an over-long message, not its head. This function walks the window
-       newest first on the strength of a measured position effect, and then, at the one
-       place it has to cut, it was keeping the oldest part of the message and dropping the
-       newest. A pasted spec with the actual ask at the end lost exactly the ask. The
-       principle is the same at both scales: what is nearest to now is the query. */
-    const bounded = text.slice(-(USER_INTENT_CHARS - chars));
+    /* Both ends of an over-long message, never one.
+
+       This kept the head, was changed to keep the tail on the argument that the position
+       effect should apply within a message as it does across the window, and neither is
+       right. The measured effect is about position in the WINDOW, and "fix X, here are the
+       logs" is at least as common as a trailing ask (Codex, 2026-08-13, whose example was
+       the review brief it was reading, where tail-only would have discarded every numbered
+       question and ranked on the closing section alone). Neither end is reliably the ask,
+       so when a message will not fit, keep the opening and the closing and drop the
+       middle, which is payload in both shapes. */
+    const room = USER_INTENT_CHARS - chars;
+    /* The elision marker is part of the budget, not on top of it, or the bound is not a
+       bound: half plus half plus the marker came out over USER_INTENT_CHARS. */
+    const half = Math.max(0, Math.floor((room - ELISION.length) / 2));
+    const bounded = text.length <= room ? text
+      : `${text.slice(0, half)}${ELISION}${text.slice(-half)}`;
     chars += bounded.length;
     picked.push({ role: "user", content: bounded });
   }

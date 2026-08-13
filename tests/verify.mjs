@@ -539,17 +539,23 @@ const fanned = surfFan.flush().split("\n").filter((line) => line.startsWith("pol
 assert.equal(fanned.length, 3, `nine matching articles rode one message: ${fanned.length}`);
 pass("ranked articles are capped per message; the address spine is not counted against it");
 
-/* Held back, not discarded. The next turn stages the next three, so a large residue is
-   delivered over turns rather than dropped or dumped at once. */
+/* The cap alone did not bound what a session spends: `seen` stops a flushed path coming
+   back, but nothing stopped the NEXT three being released against the very same query, so
+   an unchanged question bought three more articles every turn until the residue ran out.
+   That serialises the fan-out instead of bounding it. A ranked article has to be paid for
+   by new intent, not by another turn passing. */
 surfFan.noteIntent("shell", { command: "reconciliation rounding rule" });
 surfFan.retrieve();
-const second = surfFan.flush().split("\n").filter((line) => line.startsWith("policy/"));
-assert.equal(second.length, 3, "the next turn carries the next three");
-assert.ok(
-  !second.some((line) => fanned.includes(line)),
-  "the second message repeats nothing from the first",
-);
-pass("what the cap held back is still eligible on the following turn");
+assert.equal(surfFan.flush(), undefined, "the same question does not buy three more");
+pass("an unchanged question releases nothing further, however many turns pass");
+
+/* Intent that actually moved is what releases the next ones. */
+surfFan.noteIntent("shell", { command: "reconciliation rounding variant detail" });
+surfFan.retrieve();
+const second = (surfFan.flush() ?? "").split("\n").filter((line) => line.startsWith("policy/"));
+assert.ok(second.length > 0 && second.length <= 3, `moved intent releases up to three: ${second.length}`);
+assert.ok(!second.some((line) => fanned.includes(line)), "and repeats nothing already sent");
+pass("intent that moved releases the next ones, still capped");
 
 /* Intent is this turn's, and it is evidence-free: a tool RESULT never reaches the
    query. pi-fold measured a window carrying 29,244 characters of tool output against
@@ -1047,15 +1053,24 @@ assert.ok(bounded.at(-1).content.includes("question 39"), "the newest speech is 
 assert.ok(!bounded.some((p) => p.content.includes("question 0")), "the oldest is dropped");
 pass("user speech is bounded and newest-first, per the position control");
 
-/* And the cut inside one over-long message goes the same way. A pasted spec whose actual
-   ask sits at the end used to lose exactly the ask, because the function walked the window
-   newest first and then kept the oldest part of the message it landed on. */
-const longAsk = "PREAMBLE. ".repeat(400) + "So please fix the reconciliation rounding.";
-const tail = userIntent([{ role: "user", content: longAsk }]);
-assert.ok(tail[0].content.endsWith("So please fix the reconciliation rounding."), "the ask survives");
-assert.ok(!tail[0].content.startsWith("PREAMBLE. PREAMBLE."), "the preamble is what gets dropped");
-assert.ok(tail[0].content.length <= 1500, "and it is still bounded");
-pass("an over-long message is cut at its head, not its tail");
+/* The cut inside one over-long message keeps BOTH ends. Head-only lost a trailing ask;
+   tail-only lost a leading one, and "fix X, here are the logs" is at least as common as
+   "here is the context, please fix X". Neither end is reliably the ask, so the middle is
+   what goes: it is payload in both shapes. */
+const trailingAsk = "PREAMBLE. ".repeat(400) + "So please fix the reconciliation rounding.";
+const keptTrailing = userIntent([{ role: "user", content: trailingAsk }])[0].content;
+assert.ok(keptTrailing.endsWith("So please fix the reconciliation rounding."), "a trailing ask survives");
+assert.ok(keptTrailing.startsWith("PREAMBLE."), "and so does the opening");
+assert.ok(keptTrailing.length <= 1500, "and it is still bounded");
+
+const leadingAsk = "Please fix the reconciliation rounding. " + "LOG LINE. ".repeat(400);
+const keptLeading = userIntent([{ role: "user", content: leadingAsk }])[0].content;
+assert.ok(keptLeading.startsWith("Please fix the reconciliation rounding."), "a leading ask survives too");
+assert.ok(keptLeading.length <= 1500, "and it is still bounded");
+
+/* A message that fits is untouched: no ellipsis is introduced where nothing was cut. */
+assert.equal(userIntent([{ role: "user", content: "short question" }])[0].content, "short question");
+pass("an over-long message keeps both ends and drops the middle");
 
 /* End to end: a question with no tool call at all still retrieves, which is exactly the
    turn an unaddressed article is for. */

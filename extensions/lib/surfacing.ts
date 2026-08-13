@@ -117,6 +117,9 @@ export class Surfacer {
   private pendingUpdates = new Set<string>();
   private staged = new Map<string, { capsule: string; stamp: string; asset: string; score?: number }>();
   private retriever: Retriever;
+  /* The intent the residue was last ranked against, so an unchanged question does not keep
+     buying more guesses every turn. See retrieve(). */
+  private lastQuery = "";
   private resurface: boolean;
   /* This turn's tool calls, cleared when it flushes: what the agent is doing right now,
      and nothing older. Recency is structural here rather than a weighting. */
@@ -298,6 +301,18 @@ export class Surfacer {
     this.retriever.index?.(candidates);
     const query = intentQuery(turns);
     if (!query.trim()) return;
+    /* A new ranked article is justified by new intent, never by another turn passing.
+
+       The per-message cap bounds how much rides one message; on its own it did not bound
+       what a session spends. `seen` keeps a flushed path from returning but does nothing to
+       stop the NEXT three being released against the very same query, and user speech
+       persists in the projection while flush clears only tool intent, so an unchanged
+       question released three more articles every turn until the residue ran out. That
+       serialises the fan-out rather than bounding it (Codex, 2026-08-13). The two together
+       are the bound: three per message, and nothing further until the agent's intent
+       actually moves. */
+    if (query === this.lastQuery) return;
+    this.lastQuery = query;
     let scores: Map<string, number>;
     try {
       scores = this.retriever.score(query, candidates);
