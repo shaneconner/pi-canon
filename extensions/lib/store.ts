@@ -4,7 +4,7 @@
    so the tree stays hand editable and Obsidian readable with no parser dependency;
    keys this package does not own are carried through writes untouched. */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 export interface Article {
@@ -107,6 +107,15 @@ function unscalar(value: string): string {
 /* Which collision an entry was: name.md is the first, name-2.md the second. A burst of
    entries lands inside one millisecond and shares a stamp, so this is what actually
    separates them, and it is the same counter that wrote the file. */
+/* One journal entry as the index carries it: name, the instant it recorded, its subjects.
+   Short keys because this file grows one line per entry forever and is never read by a
+   human; the shape is documented here instead. */
+interface JournalRow {
+  n: string;
+  a: string;
+  s: string[];
+}
+
 function sequenceOf(name: string): number {
   return Number(/-(\d+)\.md$/.exec(name)?.[1] ?? 1);
 }
@@ -235,19 +244,42 @@ export class CanonStore {
        three" was not the newest three (Codex, 2026-08-13). Subjects are quoted through
        the same scalar() as everything else, so an address containing a comma survives
        the round trip instead of splitting into two. */
+    const stamp = new Date().toISOString();
     const front = [
       entry.subject?.length ? `subject: [${entry.subject.map(scalar).join(", ")}]` : "",
-      `logged: ${new Date().toISOString()}`,
+      `logged: ${stamp}`,
     ].filter(Boolean).join("\n");
     const text = `---\n${front}\n---\n${entry.body.trimEnd()}\n`;
     for (let n = 1; ; n += 1) {
-      const file = join(this.journalDir, `${today()}-${slug}${n > 1 ? `-${n}` : ""}.md`);
+      const name = `${today()}-${slug}${n > 1 ? `-${n}` : ""}.md`;
+      const file = join(this.journalDir, name);
       try {
         writeFileSync(file, text, { flag: "wx" });
+        this.note({ n: name, a: stamp, s: entry.subject ?? [] });
         return file;
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
       }
+    }
+  }
+
+  /* Append the new entry to both the loaded index and the file on disk, so the count stays
+     matched and the next session loads instead of rebuilding. Appending only when the index
+     is already loaded would leave the file one row short of the directory and force a
+     rebuild every session that journals without reading. */
+  private note(row: JournalRow): void {
+    try {
+      if (existsSync(this.indexFile)) {
+        if (this.index) this.index.push(row);
+        appendFileSync(this.indexFile, JSON.stringify(row) + "\n");
+        return;
+      }
+      /* No index yet. Drop what is cached and rebuild from the directory, which already
+         holds this entry, so the file is created complete rather than one row short. */
+      this.index = undefined;
+      this.rows();
+    } catch {
+      /* Losing the append costs a rebuild next session, never a failed write. */
     }
   }
 
@@ -259,27 +291,74 @@ export class CanonStore {
     }
   }
 
+  /* One row per entry: filename, the instant it recorded, the addresses it names.
+     Everything journalMentions needs, so a read never opens a journal file. */
+  private index: JournalRow[] | undefined;
+
+  private get indexFile(): string {
+    return join(this.root, ".journal-index.jsonl");
+  }
+
+  private static row(dir: string, name: string): JournalRow {
+    const text = readFileSync(join(dir, name), "utf8");
+    /* Hand written and pre-2.0 entries have no stamp; the date in the name is the
+       best available and still orders them against each other. */
+    return {
+      n: name,
+      a: /^logged:\s*(.*)$/m.exec(text)?.[1]?.trim() || name.slice(0, 10),
+      s: subjectList(/^subject:\s*(.*)$/m.exec(text)?.[1] ?? ""),
+    };
+  }
+
+  /* The index, checked against one directory listing and no file reads.
+
+     Holding the cache without checking was wrong: a second CanonStore on the same root, or
+     this one after an entry arrives from outside, answers from a snapshot that has since
+     moved. One readdir per call is the cheap validation, and it is still the whole point,
+     because what this replaced read every entry on every article read.
+
+     What a count cannot see is an entry whose subject line is edited in place: the count
+     matches and the stale row stands. That is the deliberate trade. Catching it means
+     opening every entry, which is the scan this exists to remove, and the cost of being
+     wrong is one filename missing from a hint list that only invites digging. */
+  private rows(): JournalRow[] {
+    const count = this.journalCount();
+    if (this.index && this.index.length === count) return this.index;
+    let loaded: JournalRow[] | undefined;
+    try {
+      loaded = readFileSync(this.indexFile, "utf8")
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as JournalRow);
+    } catch {
+      loaded = undefined;
+    }
+    if (loaded && loaded.length === count) return (this.index = loaded);
+    let rebuilt: JournalRow[] = [];
+    try {
+      rebuilt = readdirSync(this.journalDir)
+        .filter((name) => name.endsWith(".md"))
+        .map((name) => CanonStore.row(this.journalDir, name));
+    } catch {
+      return (this.index = []);
+    }
+    try {
+      mkdirSync(this.root, { recursive: true });
+      writeFileSync(this.indexFile, rebuilt.map((r) => JSON.stringify(r)).join("\n") + "\n");
+    } catch {
+      /* An unwritable index costs a rebuild next session, never a failed read. */
+    }
+    return (this.index = rebuilt);
+  }
+
   /* Journal entries whose subject names this address: the index a read surfaces
      so the agent can dig into event history when it wants more than current truth. */
   /* Oldest first, by the instant the entry recorded rather than by its filename. */
   journalMentions(path: string): string[] {
-    try {
-      const found: { name: string; at: string }[] = [];
-      for (const name of readdirSync(this.journalDir)) {
-        if (!name.endsWith(".md")) continue;
-        const text = readFileSync(join(this.journalDir, name), "utf8");
-        const subject = /^subject:\s*(.*)$/m.exec(text)?.[1] ?? "";
-        if (!subjectList(subject).includes(path)) continue;
-        /* Hand written and pre-2.0 entries have no stamp; the date in the name is the
-           best available and still orders them against each other. */
-        found.push({ name, at: /^logged:\s*(.*)$/m.exec(text)?.[1]?.trim() || name.slice(0, 10) });
-      }
-      return found
-        .sort((a, b) => (a.at === b.at ? sequenceOf(a.name) - sequenceOf(b.name) : a.at.localeCompare(b.at)))
-        .map((entry) => entry.name);
-    } catch {
-      return [];
-    }
+    return this.rows()
+      .filter((row) => row.s.includes(path))
+      .sort((a, b) => (a.a === b.a ? sequenceOf(a.n) - sequenceOf(b.n) : a.a.localeCompare(b.a)))
+      .map((row) => row.n);
   }
 
   map(under = ""): string {

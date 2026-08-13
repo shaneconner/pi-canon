@@ -809,6 +809,35 @@ assert.equal(capped.content[0].text.split("journal: ")[1].split(" and ")[0].spli
 assert.ok(!capped.content[0].text.includes("Event "));
 pass("the journal index shows the newest three filenames and no content");
 
+/* The mentions index is a file, not a rescan: journalMentions used to open every entry on
+   every article read, which on a real store was thousands of reads per session. What it
+   costs now is one directory listing, and the three ways the file can be wrong all have to
+   heal on their own, because the alternative is knowledge that silently stops surfacing. */
+{
+  const indexFile = join(store.root, ".journal-index.jsonl");
+  assert.equal(readFileSync(indexFile, "utf8").trim().split("\n").length, store.journalCount(),
+    "the index carries one row per entry");
+
+  /* A second store on the same root sees entries the first one wrote. Caching without
+     checking made this answer from a snapshot taken before they existed. */
+  const other = new CanonStore(store.root);
+  assert.deepEqual(other.journalMentions("src/capped"), store.journalMentions("src/capped"));
+
+  /* An entry that arrives from outside this package, by hand or by sync. */
+  writeFileSync(join(store.journalDir, "2020-01-01-outside.md"),
+    "---\nsubject: [src/capped]\nlogged: 2020-01-01T00:00:00.000Z\n---\nFrom elsewhere.\n");
+  const afterOutside = new CanonStore(store.root).journalMentions("src/capped");
+  assert.ok(afterOutside.includes("2020-01-01-outside.md"), "an outside entry is picked up");
+  assert.equal(afterOutside[0], "2020-01-01-outside.md", "and still sorts by when it happened");
+
+  /* A corrupt index rebuilds rather than answering nothing. */
+  writeFileSync(indexFile, "not json\n");
+  assert.deepEqual(new CanonStore(store.root).journalMentions("src/capped"), afterOutside);
+  assert.equal(readFileSync(indexFile, "utf8").trim().split("\n").length, store.journalCount(),
+    "and the rebuilt index is written back");
+  pass("the journal index heals from a stale instance, an outside entry, and a corrupt file");
+}
+
 const mapped2 = await tools[0].execute("id", { action: "map", path: "src/core" }, undefined, undefined, ctx);
 assert.match(mapped2.content[0].text, /src\/core\/config: Loads layered config/);
 const bogus = await tools[0].execute("id", { action: "bogus" }, undefined, undefined, ctx);
