@@ -13,7 +13,7 @@ const projectRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const jiti = createJiti(import.meta.url);
 
 const { CanonStore, normalize } = await jiti.import(join(projectRoot, "extensions/lib/store.ts"));
-const { advise, unapplied, unretained, BODY_WARN_CHARS, BODY_LARGE_CHARS, CAPSULE_CHARS } = await jiti.import(join(projectRoot, "extensions/lib/lint.ts"));
+const { advise, unretained, BODY_WARN_CHARS, BODY_LARGE_CHARS, CAPSULE_CHARS } = await jiti.import(join(projectRoot, "extensions/lib/lint.ts"));
 const { Surfacer } = await jiti.import(join(projectRoot, "extensions/lib/surfacing.ts"));
 const { buildRetriever, governsAnAsset, intentQuery, LexicalRetriever, residue, RULE_SCOPE, userIntent } =
   await jiti.import(join(projectRoot, "extensions/lib/retrieval.ts"));
@@ -308,7 +308,7 @@ const surfRead = new Surfacer([{ name: "", dir: projDir, store }]);
 surfRead.collect([join(projDir, "src/feed/sync.ts")]);
 surfRead.markSeen("src/feed/sync", CAPSULE_PRESENT);
 assert.equal(surfRead.flush(), undefined);
-surfRead.observe([{ role: "toolResult", content: `capsule: ${CAPSULE_PRESENT}\n\nbody` }]);
+surfRead.observe([{ role: "toolResult", content: `src/feed/sync\ncapsule: ${CAPSULE_PRESENT}\n\nbody` }]);
 surfRead.collect([join(projDir, "src/feed/sync.ts")]);
 assert.equal(surfRead.flush(), undefined, "a read article is present while its result is live");
 surfRead.observe([{ role: "user", content: "that result got folded" }]);
@@ -333,7 +333,7 @@ writeFileSync(join(projDir, "src/audit/actor.ts"), "export const a = 4;\n");
 const surfBody = new Surfacer([{ name: "", dir: projDir, store }]);
 surfBody.collect([join(projDir, "src/audit/actor.ts")]);
 surfBody.markSeen("src/audit/actor", `${CAPSULE_THIN}\n${BODY_RULE}`);
-surfBody.observe([{ role: "toolResult", content: `capsule: ${CAPSULE_THIN}\n\n${BODY_RULE}` }]);
+surfBody.observe([{ role: "toolResult", content: `src/audit/actor\ncapsule: ${CAPSULE_THIN}\n\n${BODY_RULE}` }]);
 assert.equal(surfBody.stats.present, 1, "present while the body it delivered is live");
 
 /* The capsule survives; the body does not. The old mark read this as present. */
@@ -358,7 +358,7 @@ writeFileSync(join(projDir, "src/audit/paras.ts"), "export const p = 5;\n");
 const surfParas = new Surfacer([{ name: "", dir: projDir, store }]);
 surfParas.collect([join(projDir, "src/audit/paras.ts")]);
 surfParas.markSeen("src/audit/paras", `${CAPSULE_THIN}\n${BODY_PARAS}`);
-surfParas.observe([{ role: "toolResult", content: `capsule: ${CAPSULE_THIN}\n\n${BODY_PARAS}` }]);
+surfParas.observe([{ role: "toolResult", content: `src/audit/paras\ncapsule: ${CAPSULE_THIN}\n\n${BODY_PARAS}` }]);
 assert.equal(surfParas.stats.present, 1, "a multi-paragraph body is present while it is live");
 surfParas.collect([join(projDir, "src/audit/paras.ts")]);
 assert.equal(surfParas.flush(), undefined, "and is not re-surfaced under the agent");
@@ -384,13 +384,58 @@ surfBlind.collect([join(projDir, "src/feed/sync.ts")]);
 surfBlind.flush();
 surfBlind.observe(undefined);
 surfBlind.observe("not an array");
-const cyclic = [{ role: "user" }];
-cyclic[0].self = cyclic;
-surfBlind.observe(cyclic);
 assert.equal(surfBlind.stats.present, 1);
 surfBlind.collect([join(projDir, "src/feed/sync.ts")]);
 assert.equal(surfBlind.flush(), undefined);
 pass("no usable projection degrades to 1.0 behavior rather than expiring blind");
+
+/* A cycle is not unreadability. Reading the projection's strings directly, rather than
+   stringifying it, means a self-referential message array is still a projection and its
+   contents still count: this one does not carry the article, so the article is absent
+   and says so. Under JSON.stringify the same input threw and was scored as no evidence,
+   which kept a departed article present. */
+const cyclic = [{ role: "user", content: "nothing of ours here" }];
+cyclic[0].self = cyclic;
+const surfCycle = new Surfacer([{ name: "", dir: projDir, store }]);
+surfCycle.collect([join(projDir, "src/feed/sync.ts")]);
+surfCycle.flush();
+surfCycle.observe(cyclic);
+assert.equal(surfCycle.stats.present, 0, "a cyclic projection is read, not skipped");
+pass("a self-referential projection is still read instead of being treated as unreadable");
+
+/* Two collisions Codex demonstrated against the single-tail mark, both in the expensive
+   direction: the article is gone and nothing re-surfaces it.
+
+   One, a shared ending. Two articles that end the same way shared a tail, so the
+   survivor kept the departed one marked present. Addresses are unique, which is why
+   identity is now required alongside liveness. */
+store.write("src/left", { capsule: "Left hand side.", body: `Distinct opening for left.\n${"Shared maintenance footer, reviewed quarterly by the platform team.".repeat(3)}` });
+store.write("src/right", { capsule: "Right hand side.", body: `Distinct opening for right.\n${"Shared maintenance footer, reviewed quarterly by the platform team.".repeat(3)}` });
+writeFileSync(join(projDir, "src/left.ts"), "export const l = 1;\n");
+writeFileSync(join(projDir, "src/right.ts"), "export const r = 2;\n");
+const surfShared = new Surfacer([{ name: "", dir: projDir, store }]);
+surfShared.markSeen("src/left", `Left hand side.\n${store.read("src/left").body}`);
+surfShared.observe([{ role: "toolResult", content: `src/right\ncapsule: Right hand side.\n\n${store.read("src/right").body}` }]);
+assert.equal(surfShared.stats.present, 0,
+  "a different article sharing the tail must not keep this one present");
+pass("two articles with a common ending do not stand in for each other");
+
+/* Two, a literal escape sequence. Fingerprinting JSON.stringify output forced escapes to
+   be erased, which made an article mentioning a literal backslash-n identical to one
+   without it. Reading the projection's strings directly means nothing is erased. */
+const ESCAPED = "Delimiter policy: rows are split on a literal \\n and never on \\t.";
+const PLAIN = "Delimiter policy: rows are split on a literal  and never on .";
+store.write("src/delim", { capsule: "Delimiters.", body: ESCAPED });
+writeFileSync(join(projDir, "src/delim.ts"), "export const d = 3;\n");
+const surfEsc = new Surfacer([{ name: "", dir: projDir, store }]);
+surfEsc.markSeen("src/delim", `Delimiters.\n${ESCAPED}`);
+surfEsc.observe([{ role: "toolResult", content: `src/delim\ncapsule: Delimiters.\n\n${PLAIN}` }]);
+assert.equal(surfEsc.stats.present, 0,
+  "text with the escapes stripped is not the article that contained them");
+surfEsc.markSeen("src/delim", `Delimiters.\n${ESCAPED}`);
+surfEsc.observe([{ role: "toolResult", content: `src/delim\ncapsule: Delimiters.\n\n${ESCAPED}` }]);
+assert.equal(surfEsc.stats.present, 1, "and the real text still reads as present");
+pass("a literal escape sequence is content, not whitespace to be erased");
 
 /* A capsule too short to be distinctive is never expired: a missed re-surface costs
    one nudge that does not happen, a false expiry spams the window every turn. */
@@ -1148,29 +1193,5 @@ assert.deepEqual(unretained("Renamed the helper and tidied imports.", thin), [],
   "prose with no values in it reports nothing");
 pass("the value check stays silent with no article and with no values");
 
-/* --- the apply check ------------------------------------------------------------
-   e2e3, grading the first edit rather than the end state: a canon plant's first pass was
-   right 5 times in 15 against a bare plant's 15 in 15, and 5 of the 10 wrong ones were
-   later repaired. Exploratory only. These gates fix the predicate's shape, not a claim
-   about why the first pass is worse. */
-const applyDir = join(work, "apply");
-mkdirSync(join(applyDir, "ops"), { recursive: true });
-writeFileSync(join(applyDir, "ops/billing.py"), "# emitter\n");
-const applyStore = new CanonStore(join(applyDir, ".canon"));
-
-const governing = applyStore.write("ops/billing", {
-  capsule: "c", body: "The nightly close must use the system: prefix.",
-});
-assert.equal(unapplied(governing, applyDir), true);
-pass("an article stating a rule over an asset on disk asks to be checked against it");
-
-const noRule = applyStore.write("ops/audit", { capsule: "c", body: "Appends rows to the sink." });
-assert.equal(unapplied(noRule, applyDir), false, "an article carrying no rule has nothing to check");
-const noAsset = applyStore.write("policy/actors", {
-  capsule: "c", body: "Scheduled jobs must carry a registered id.",
-});
-assert.equal(unapplied(noAsset, applyDir), false, "a rule governing no file has nothing to re-read");
-assert.equal(unapplied(undefined, applyDir), false);
-pass("the apply check stays silent without a rule, without an asset, and without an article");
 
 console.log(`\nall ${gates} gates green`);

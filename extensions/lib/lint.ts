@@ -88,22 +88,6 @@ export function unretained(journalBody: string, article: Article | undefined): s
     .slice(0, VALUE_CAP);
 }
 
-/* The rule is recorded; the asset it governs may not obey it yet.
-
-   Grading the first edit rather than the end state, e2e3 put a canon plant's first pass
-   at 5 of 15 against a bare plant's 15 of 15, with 5 of the 10 wrong ones later repaired.
-   That is an exploratory association, not an established cause: the tool schema and the
-   session orientation are in the window before any edit, so this asks for a second look
-   without claiming to know what made the first one worse.
-
-   Only for an address that governs something on disk, because an article about a rule
-   with no asset has nothing to re-read. The trigger is a keyword test on the article
-   body, which is weak in both directions and known to be: it fires on any journal entry
-   under a rule-bearing article, and it misses rules phrased without one of its words. */
-export function unapplied(article: Article | undefined, dir: string): boolean {
-  return Boolean(article) && CONSTRAINT.test(article!.body) && governsAnAsset(dir, article!.path);
-}
-
 export function advise(
   article: Article,
   store: CanonStore,

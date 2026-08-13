@@ -44,28 +44,54 @@ const PATHLIKE = /(?:^|[\s"'`=:,([{])(\/?[\w.@-]+(?:\/[\w.@-]+)+)/g;
    expired; failing to expire only costs a re-surface that does not happen, while a
    false expiry would spam the window.
 
-   The mark is the TAIL of whatever actually entered the window, and the caller passes
-   the whole of it. This corrects a real defect (Codex, 2026-08-12): the capsule used
-   to be the mark for both paths, so an article read in full stayed "present" on the
-   strength of its surviving capsule line while the body that held the rule had been
-   folded away, which is the one case presence exists to catch. A surfaced line is its
-   capsule and marks on the capsule; a read is capsule plus body and marks on the body.
-   The tail rather than the head because the two ways content leaves a window are not
-   symmetric: a fold takes the whole message, and a truncation takes the end first, so
-   a head mark survives exactly the loss it should report. */
+   A mark has two parts and BOTH must be in the projection.
+
+   IDENTITY is the article's own address, which is in the window whichever way the
+   article got there: the surfaced line reads "path: capsule" and a read prints the
+   address as its title. LIVENESS is the tail of whatever actually entered, the caller
+   passing the whole of it. A surfaced line is its capsule and is held to the capsule;
+   a read is capsule plus body and is held to the body.
+
+   Both parts are needed because either alone is wrong in a way that matters. Identity
+   alone cannot tell a one-line nudge from the full article, which is the defect that
+   started this (Codex, 2026-08-12): an article read in full stayed present on the
+   strength of its surviving capsule while the body holding the rule had folded away.
+   Liveness alone collides, because two articles sharing a common ending share a tail,
+   and the survivor then keeps the other marked present (Codex, 2026-08-13). Addresses
+   are unique, so requiring both closes that.
+
+   Tail rather than head for liveness, because the two ways content leaves a window are
+   not symmetric: a fold takes the whole message, a truncation takes the end first, so a
+   head mark survives exactly the loss it is supposed to report. */
 const MARK_CHARS = 120;
 const MARK_MINIMUM = 24;
 
-/* Escaped whitespace first, then the normal pass. A projection is read through
-   JSON.stringify, which renders a newline as the two characters \ and n, and n is a
-   letter: dropping only non-alphanumerics leaves a stray "n" token exactly where the
-   article had a line break, so the two sides stop agreeing at every boundary a break
-   crosses. Invisible while marks came from single-line capsules. The moment a mark is
-   drawn from a body it decides the mechanism, and in the direction that spams: a mark
-   that can never match is an article that is never present and re-surfaces on every
-   touch. Applied to both sides, so it corrects rather than tilts. */
 function fingerprint(text: string): string {
-  return text.replace(/\\[nrt]/g, " ").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  return text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+/* The projection's actual text, gathered from the message structure rather than from
+   JSON.stringify of it. Stringifying introduced escapes that are not in anyone's text:
+   a newline arrived as the two characters \ and n, and n is a letter, so the two sides
+   disagreed at every line break. Erasing escapes afterwards fixed that and broke
+   something else, making an article containing a literal backslash-n fingerprint
+   identically to one without it (Codex, 2026-08-13), which is a false PRESENCE and so
+   the expensive direction: the article is gone and nothing re-surfaces it. Reading the
+   strings directly means no escape is ever introduced and none has to be erased. */
+function projectionText(messages: unknown[]): string {
+  const out: string[] = [];
+  const seen = new Set<unknown>();
+  const walk = (value: unknown): void => {
+    if (typeof value === "string") {
+      out.push(value);
+    } else if (value && typeof value === "object") {
+      if (seen.has(value)) return; /* a cyclic projection is still readable */
+      seen.add(value);
+      for (const inner of Array.isArray(value) ? value : Object.values(value)) walk(inner);
+    }
+  };
+  walk(messages);
+  return out.join("\n");
 }
 
 /* A store and the directory whose assets it governs. The project is the first,
@@ -82,7 +108,7 @@ export class Surfacer {
   private seen = new Set<string>();
   /* What to look for in the projection to decide an article is still visible. Absent
      for an article whose entered text is too short to test, which is never expired. */
-  private marks = new Map<string, string>();
+  private marks = new Map<string, { id: string; tail: string }>();
   private pendingUpdates = new Set<string>();
   private staged = new Map<string, { capsule: string; stamp: string; asset: string; score?: number }>();
   private retriever: Retriever;
@@ -130,7 +156,8 @@ export class Surfacer {
 
   private remember(path: string, text: string | undefined): void {
     const print = fingerprint(text ?? "");
-    if (print.length >= MARK_MINIMUM) this.marks.set(path, print.slice(-MARK_CHARS));
+    const id = fingerprint(path);
+    if (print.length >= MARK_MINIMUM && id) this.marks.set(path, { id, tail: print.slice(-MARK_CHARS) });
     else this.marks.delete(path);
   }
 
@@ -148,12 +175,7 @@ export class Surfacer {
      does not report a projection loses the mechanism and nothing else. */
   observe(messages: unknown): void {
     if (!Array.isArray(messages)) return;
-    let projection: string;
-    try {
-      projection = fingerprint(JSON.stringify(messages));
-    } catch {
-      return; /* an unserializable projection is no evidence of absence */
-    }
+    const projection = fingerprint(projectionText(messages));
     /* Read before the expiry check and independently of it: the projection is the only
        place the user's own words are visible, and a run with resurface off still wants
        them for the query. Presence is what the switch governs, not observation. */
@@ -161,7 +183,7 @@ export class Surfacer {
     if (!this.resurface) return;
     for (const path of [...this.seen]) {
       const mark = this.marks.get(path);
-      if (!mark || projection.includes(mark)) continue;
+      if (!mark || (projection.includes(mark.id) && projection.includes(mark.tail))) continue;
       this.seen.delete(path);
       this.marks.delete(path);
       this.cost.delete(path);
