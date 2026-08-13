@@ -222,7 +222,7 @@ That is development evidence over two arms of one run and it carries no confirma
 ### What the run does not establish
 
 - The five chains are development-exposed. The product changed in response to failures on these same chains, and the confirmatory run reuses them, so the freeze confirms disciplined execution rather than generalization to unseen tasks.
-- The result is package-level. It attributes nothing to the journal, the spine, or surfacing separately.
+- The result is package-level. It attributes nothing to the journal, the spine, or surfacing separately. A later development probe tried to: a sham arm carrying this package's exact tool schema and orientation line with an inert implementation, so the surface is present and no memory work happens behind it. On one chain at 15 repetitions, first-pass correctness ran bare 12/15, canon 8/15, sham 7/15. canon and sham are indistinguishable (Fisher exact, p=1.0000) and neither separates from bare at that size (p=0.25 and p=0.13). Fifteen repetitions cannot establish equivalence, so read it as the absence of a signal rather than the presence of a null. What it does say is that any account of this package's costs has to start with the tool surface, because nothing behind the surface has yet been shown to contribute to them.
 - No evaluated arm is a search-driven LLM wiki, so nothing here is a comparison against one.
 - The `agents.md` arm is one construct, a self-maintained file under author-designed preload noise, with no clean-file or human-maintained counterpart run beside it.
 - Eligibility is model-relative. A check counts as a trap only where a cold run of the worker failed it, so every number built on it moves when the worker does.
