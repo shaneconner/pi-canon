@@ -617,7 +617,10 @@ export class Surfacer {
       const key = mount.name ? `${mount.name}:${article.path}` : article.path;
       if (key !== written) continue;
       this.checkedBack.add(written);
-      trace("check-back", { path: written });
+      /* The asset is in the record because the path alone cannot distinguish a real
+         touch from a write that somehow triggered itself: an audit of this channel
+         needs to see WHAT the session touched to earn the line (Sol Pro, 2026-08-14). */
+      trace("check-back", { path: written, asset });
       return (
         "This session touched the asset this article governs. Check the asset as it " +
         "stands does what the article says; the session that records a rule is the one " +

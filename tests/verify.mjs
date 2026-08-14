@@ -1111,6 +1111,58 @@ pass("an empty-string body or capsule leaves stored content untouched");
   pass("recording a rule for a touched asset asks the session to check the asset obeys it");
 }
 
+/* The same channel through the REAL event lifecycle, because the gate above drives the
+   surfacer by hand and so cannot catch the one failure that would invert a study built
+   on this: the write's own path argument counting as a touch. pi_canon's calls are
+   excluded from the scanner at the handler (canon.ts), and this gate is what pins that:
+   a session that touches nothing and writes an article must see NO check-back even
+   though the write's own input carries a perfectly path-shaped address whose parent
+   exists. Then a real touch through the same handlers earns exactly one, and the trace
+   names the asset that earned it, so an audit can tell a touch from a self-trigger
+   (Sol Pro review, 2026-08-14, finding 1). */
+{
+  const lifeDir = join(work, "checkback-lifecycle");
+  mkdirSync(join(lifeDir, "ops"), { recursive: true });
+  writeFileSync(join(lifeDir, "ops/billing.py"), "JOB = 'billing-close'\n");
+  const h = {};
+  const lifeTools = [];
+  registerPiCanon(
+    { on: (n, f) => (h[n] ??= []).push(f), registerTool: (t) => lifeTools.push(t), registerCommand() {}, sendMessage() {} },
+    {},
+  );
+  const lifeCtx = { cwd: lifeDir, ui: { notify() {} } };
+  for (const fn of h.session_start) fn({ reason: "startup" }, lifeCtx);
+  const lifeTraceFile = join(work, "checkback-lifecycle-trace.jsonl");
+  process.env.PI_CANON_TRACE = lifeTraceFile;
+  /* The write arrives the way pi delivers it: the tool_call event fires for the call
+     itself, then the tool executes. No asset was touched before it. */
+  const writeInput = {
+    action: "write", path: "ops/billing",
+    capsule: "Jobs register with the system: prefix.",
+    body: "The scheduler id is system:billing-close, prefix included.",
+  };
+  for (const fn of h.tool_call) fn({ toolName: "pi_canon", toolCallId: "L1", input: writeInput }, lifeCtx);
+  const untouched = await lifeTools[0].execute("L1", writeInput, undefined, undefined, lifeCtx);
+  assert.ok(!untouched.content[0].text.includes("Check the asset"),
+    "a write is not a touch: the nudge must not trigger itself");
+  /* Now the real thing: an ordinary tool edits the asset, and the next write about it
+     is asked to look back. */
+  for (const fn of h.tool_call) fn({ toolName: "edit", toolCallId: "L2", input: { path: join(lifeDir, "ops/billing.py") } }, lifeCtx);
+  const amendInput = { action: "write", path: "ops/billing", capsule: "Jobs register with the system: prefix.", body: "Amended after the edit." };
+  for (const fn of h.tool_call) fn({ toolName: "pi_canon", toolCallId: "L3", input: amendInput }, lifeCtx);
+  const touched = await lifeTools[0].execute("L3", amendInput, undefined, undefined, lifeCtx);
+  delete process.env.PI_CANON_TRACE;
+  assert.match(touched.content[0].text, /Check the asset as it stands does what the article says/,
+    "the same write after a real touch earns the line");
+  const lifeRows = readFileSync(lifeTraceFile, "utf8").trim().split("\n").map(JSON.parse)
+    .filter((row) => row.kind === "check-back");
+  assert.equal(lifeRows.length, 1, "one check-back across both writes");
+  assert.equal(lifeRows[0].path, "ops/billing");
+  assert.match(String(lifeRows[0].asset), /ops\/billing\.py$/,
+    "the trace names the asset that earned the line, not just the article");
+  pass("through the real event lifecycle, a write never triggers its own check-back");
+}
+
 store.write("src/capped", { capsule: "Capped.", body: "b" });
 for (let n = 1; n <= 5; n += 1) store.journal({ body: `Event ${n}.`, slug: "capped-event", subject: ["src/capped"] });
 const capped = await tools[0].execute("id", { action: "read", path: "src/capped" }, undefined, undefined, ctx);
