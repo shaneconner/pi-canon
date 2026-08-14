@@ -26,7 +26,7 @@ Advisory strings returned from write, never a refusal: a blocked write teaches a
 
 ## Constants over options
 
-The public surface is five options: `root`, `surface`, `mounts`, `resurface`, and `retrieval`. Size bands and the capsule write target are constants; a constant that needs changing becomes a new default, not a knob. Unknown options throw by name.
+The public surface is six options: `root`, `surface`, `mounts`, `resurface`, `retrieval`, and `threshold`. Size bands and the capsule write target are constants; a constant that needs changing becomes a new default, not a knob. Unknown options throw by name.
 
 ## Deferred, each behind a demonstrated need
 

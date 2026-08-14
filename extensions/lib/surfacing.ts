@@ -137,10 +137,14 @@ export class Surfacer {
   private lastFlush = new Map<string, { capsule: string; stamp: string; asset: string; score?: number }>();
   private lastNudge: string[] = [];
 
-  constructor(mounts: Mount[], retriever: Retriever = NONE, resurface = true) {
+  /* The score a ranked article must reach to ride a message. See retrieve(). */
+  private threshold: number;
+
+  constructor(mounts: Mount[], retriever: Retriever = NONE, resurface = true, threshold = 0) {
     this.mounts = mounts;
     this.retriever = retriever;
     this.resurface = resurface;
+    this.threshold = threshold;
   }
 
   private get project(): Mount {
@@ -270,10 +274,19 @@ export class Surfacer {
 
      `score > 0` is not a tuned threshold. With BM25 normalized against its saturation
      ceiling it means "at least one query term appears in this article at all", which is
-     a property of the query rather than a constant someone picked. Where a real cutoff
-     belongs is a question for the data: every staged line carries its score and records
-     what it cost, so context taken can be read against relevance afterwards. Deciding
-     it in advance with a constant is the mistake the session budget already made.
+     a property of the query rather than a constant someone picked. `threshold` is the
+     tuned cutoff, and it is the caller's rather than a constant here because it is the
+     one number whose right value depends on the corpus: how much of a project's memory
+     governs no asset, and how alike those articles are.
+
+     The data that made it an option rather than a hypothetical: at threshold 0 a study
+     session was handed 28 ranked lines and opened 5, and the scores of the ones it
+     opened and the ones it ignored overlap but do separate (median 0.25 against 0.19),
+     which is the precondition a cutoff needs to be worth having. What that study cannot
+     say is where to put it, because every article in its residue was a distractor by
+     construction, so a higher open rate there would have been a worse outcome, not a
+     better one. Hence a default of 0, which changes nothing, and a knob rather than a
+     constant until a corpus with something worth finding in its residue has priced it.
 
      What IS bounded is how many of them ride one message, and that is a different thing
      from a threshold. A threshold rules on relevance; this rules on transport. Sharing
@@ -320,11 +333,23 @@ export class Surfacer {
       trace("retrieval-failed", { retriever: this.retriever.name, error: String(error) });
       return; /* a retriever that throws must never break the turn */
     }
-    const ranked = candidates
+    const scored = candidates
       .map((candidate) => ({ candidate, score: scores.get(candidate.path) }))
-      .filter((entry) => typeof entry.score === "number" && entry.score > 0)
+      .filter((entry) => typeof entry.score === "number" && entry.score > 0);
+    /* Both conditions, not one: `> 0` rules out an article the query never touched, and
+       the threshold rules out one it touched too lightly to be worth a line. At the
+       default of 0 the second is a no-op and the first still holds, so a zero-scoring
+       article never rides on the grounds that it cleared a cutoff of nothing. */
+    const ranked = scored
+      .filter((entry) => (entry.score as number) >= this.threshold)
       .filter((entry) => !this.seen.has(entry.candidate.path) && !this.staged.has(entry.candidate.path))
       .sort((a, b) => (b.score as number) - (a.score as number));
+    const cut = scored.length - scored.filter((entry) => (entry.score as number) >= this.threshold).length;
+    if (cut) {
+      /* Reported even though nothing was spent on it, because the number that says a
+         threshold is set too high is the one it silently removed. */
+      trace("below-threshold", { count: cut, threshold: this.threshold });
+    }
     /* What is already staged counts against the cap.
 
        undoFlush restages an undelivered message, and restaged entries are excluded from

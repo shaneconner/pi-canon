@@ -27,14 +27,22 @@ export interface CanonOptions {
      "lexical" is BM25 over the standard library. Anything needing a model is supplied
      here as { name, score, index? }, so this package never depends on one. */
   retrieval?: RetrievalOption;
+  /* The score a ranked article must reach before it may ride a message, on the 0 to 1
+     scale every retriever normalizes to. Default 0, which admits anything with any
+     overlap at all and is what a study measured at 28 lines a session, of which 81%
+     were never opened. Raising it trades recall for precision, and precision is the
+     side that matters: an unsolicited line that is usually noise teaches the agent to
+     skip the next one, and that costs more than the tokens do. Ignored when retrieval
+     is "none", because nothing is ranked. */
+  threshold?: number;
 }
 
 export function registerPiCanon(pi: any, options: CanonOptions = {}): void {
-  const known = new Set(["root", "surface", "mounts", "resurface", "retrieval"]);
+  const known = new Set(["root", "surface", "mounts", "resurface", "retrieval", "threshold"]);
   const unknown = Object.keys(options).find((key) => !known.has(key));
   if (unknown) {
     throw new Error(
-      `pi-canon: unknown option "${unknown}". The options are root, surface, mounts, resurface, and retrieval; everything else is a constant on purpose.`,
+      `pi-canon: unknown option "${unknown}". The options are root, surface, mounts, resurface, retrieval, and threshold; everything else is a constant on purpose.`,
     );
   }
   const surface = options.surface !== false;
@@ -42,6 +50,19 @@ export function registerPiCanon(pi: any, options: CanonOptions = {}): void {
   /* Built here rather than at first use, so a bad retrieval option throws at
      registration beside the unknown-option check instead of mid-session. */
   const retriever = buildRetriever(options.retrieval);
+  /* Validated here for the same reason, and strictly: a threshold silently coerced from
+     a string or waved through as NaN would compare false against every score and turn
+     retrieval off without saying so, which is the one failure a tuning knob must not
+     have. Above 1 is refused rather than clamped, because a caller who wrote 60 meant
+     percent and wants to be told, not to be handed silence. */
+  const threshold = options.threshold ?? 0;
+  if (typeof threshold !== "number" || !Number.isFinite(threshold) || threshold < 0 || threshold > 1) {
+    throw new Error(
+      `pi-canon: threshold must be a number from 0 to 1, the scale retrievers normalize to; got ${
+        typeof threshold === "number" ? threshold : typeof threshold
+      }.`,
+    );
+  }
 
   let runtime: CanonRuntime | undefined;
 
@@ -61,7 +82,13 @@ export function registerPiCanon(pi: any, options: CanonOptions = {}): void {
           return { name: basename(abs), dir: abs, store: new CanonStore(join(abs, ".canon")) };
         }),
       ];
-      runtime = { store, surfacer: new Surfacer(mounts, retriever, resurface), cwd, mounts, retrieval: retriever.name };
+      runtime = {
+        store,
+        surfacer: new Surfacer(mounts, retriever, resurface, threshold),
+        cwd,
+        mounts,
+        retrieval: retriever.name,
+      };
     }
     return runtime;
   };

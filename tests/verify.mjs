@@ -506,6 +506,57 @@ assert.match(lexical, /policy\/rounding/, "the article the query touches surface
 assert.doesNotMatch(lexical, /policy\/timezones/, "one it does not touch stays put");
 pass("lexical retrieval surfaces an unaddressed article the intent reaches");
 
+/* The threshold is the precision knob: same store, same query, same retriever, and the
+   only thing that changes is how good a match has to be before it may spend a line.
+   The cutoffs are derived from the score this fixture actually produces rather than
+   written in as constants, because BM25 normalizes against the corpus and a later
+   article added anywhere above here would move the number and quietly turn one of these
+   two assertions into a tautology. */
+const thresholdIntent = [{ toolName: "shell", input: { command: "python reconciliation totals rounding check" } }];
+const thresholdCandidates = residue(store, projDir);
+const thresholdScorer = new LexicalRetriever();
+thresholdScorer.index?.(thresholdCandidates);
+const roundingScore = thresholdScorer
+  .score(intentQuery(thresholdIntent), thresholdCandidates)
+  .get("policy/rounding");
+assert.ok(roundingScore > 0.05 && roundingScore < 0.95, `a usable fixture score, got ${roundingScore}`);
+
+const surfHigh = new Surfacer([{ name: "", dir: projDir, store }], new LexicalRetriever(), true, roundingScore + 0.01);
+surfHigh.noteIntent("shell", { command: "python reconciliation totals rounding check" });
+surfHigh.retrieve();
+assert.equal(surfHigh.flush(), undefined, "a match below the threshold rides nothing");
+const surfLow = new Surfacer([{ name: "", dir: projDir, store }], new LexicalRetriever(), true, roundingScore - 0.01);
+surfLow.noteIntent("shell", { command: "python reconciliation totals rounding check" });
+surfLow.retrieve();
+assert.match(surfLow.flush(), /policy\/rounding/, "a match above it still rides");
+pass("the threshold decides which ranked articles may spend a line");
+
+/* A threshold of 0 must not become "everything": the zero-score article is one the query
+   never touched at all, and admitting it because it cleared a cutoff of nothing would
+   turn the default into the worst setting available. */
+const surfZero = new Surfacer([{ name: "", dir: projDir, store }], new LexicalRetriever(), true, 0);
+surfZero.noteIntent("shell", { command: "python reconciliation totals rounding check" });
+surfZero.retrieve();
+const atZero = surfZero.flush();
+assert.match(atZero, /policy\/rounding/);
+assert.doesNotMatch(atZero, /policy\/timezones/, "a zero score never clears a zero threshold");
+pass("a threshold of 0 admits what the query touched and nothing else");
+
+/* What a threshold removed is the number that says it is set too high, so it is traced
+   even though nothing was spent on it. */
+const cutTraceFile = join(work, "threshold-trace.jsonl");
+process.env.PI_CANON_TRACE = cutTraceFile;
+const surfCut = new Surfacer([{ name: "", dir: projDir, store }], new LexicalRetriever(), true, roundingScore + 0.01);
+surfCut.noteIntent("shell", { command: "python reconciliation totals rounding check" });
+surfCut.retrieve();
+delete process.env.PI_CANON_TRACE;
+const cutRows = readFileSync(cutTraceFile, "utf8").trim().split("\n").map(JSON.parse)
+  .filter((row) => row.kind === "below-threshold");
+assert.equal(cutRows.length, 1);
+assert.equal(cutRows[0].count, 1, "the one article the query touched, and not the one it did not");
+assert.equal(cutRows[0].threshold, roundingScore + 0.01);
+pass("what the threshold removed is recorded, not silently dropped");
+
 /* Ranked lines never displace an addressed one: the address is certain, the score is a
    guess, so the certainty leads the message. */
 const surfRank = new Surfacer([{ name: "", dir: projDir, store }], new LexicalRetriever());
@@ -679,6 +730,19 @@ assert.throws(() => registerPiCanon(quietPi, { retrieval: "embeddings" }), /retr
 registerPiCanon(quietPi, { retrieval: "lexical" });
 registerPiCanon(quietPi, { retrieval: { name: "byo", score: () => new Map() } });
 pass("retrieval is validated at registration, built-in name or supplied scorer");
+
+/* A threshold that arrives unusable must throw rather than compare false against every
+   score, which would turn retrieval off and report nothing. NaN is the case that
+   matters: it is a number, it is finite-looking to a lazy check, and every comparison
+   against it is false. */
+assert.throws(() => registerPiCanon(quietPi, { threshold: "0.4" }), /threshold must be/);
+assert.throws(() => registerPiCanon(quietPi, { threshold: NaN }), /threshold must be/);
+assert.throws(() => registerPiCanon(quietPi, { threshold: -0.1 }), /threshold must be/);
+assert.throws(() => registerPiCanon(quietPi, { threshold: 60 }), /threshold must be/);
+registerPiCanon(quietPi, { retrieval: "lexical", threshold: 0.4 });
+registerPiCanon(quietPi, { retrieval: "lexical", threshold: 0 });
+registerPiCanon(quietPi, { retrieval: "lexical", threshold: 1 });
+pass("a threshold outside 0 to 1 is refused at registration rather than silencing retrieval");
 
 const handlers = {};
 const sent = [];
