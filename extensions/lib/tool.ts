@@ -5,6 +5,7 @@ import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
 import { advise, unretained } from "./lint.ts";
 import { contained, normalize, type CanonStore } from "./store.ts";
+import { type Candidate, LexicalRetriever, RULE_SCOPE } from "./retrieval.ts";
 import type { Mount, Surfacer } from "./surfacing.ts";
 
 export interface CanonRuntime {
@@ -64,7 +65,7 @@ export function buildCanonTool(ready: (ctx: unknown) => CanonRuntime, retrieval 
     parameters: {
       type: "object",
       properties: {
-        action: { type: "string", enum: ["read", "write", "journal", "map"] },
+        action: { type: "string", enum: ["read", "write", "journal", "map", "search"] },
         path: {
           type: "string",
           description: "Article address, e.g. src/core/config. Required for read and write; optional filter for map.",
@@ -76,6 +77,7 @@ export function buildCanonTool(ready: (ctx: unknown) => CanonRuntime, retrieval 
             "limits, what breaks). journal: the event text, source details intact.",
         },
         capsule: { type: "string", description: "write: one dense line injected when the asset is touched." },
+        query: { type: "string", description: "search: words to look for, across articles and the journal." },
         scope: {
           type: "string",
           enum: ["rule", "asset"],
@@ -129,6 +131,83 @@ function filingTail(retrieval: string): string {
     "reads like the situation it governs, and write them with scope rule so a rule on purpose " +
     "is not mistaken for an article whose asset went missing."
   );
+}
+
+/* Agent-solicited search, over articles AND the journal.
+
+   Three channels reach this memory and their scopes differ on purpose. Surfacing on touch is
+   ADDRESS ONLY: you touched an asset, you get the article governing it. Search is ANY: the
+   agent asked, so nothing is withheld, and a journal entry is a first class result even
+   though it has no address at all.
+
+   Every result carries what SCOPES it, which is the one thing a result cannot be useful
+   without. A study of a 259 KB flat memory found sessions receiving every fact they needed
+   and still answering wrong, because a grep returned 201 answers to one question with nothing
+   saying which situation each applied to. For an article the scope is its address; for a
+   journal entry it is the instant and the subjects it named. Neither is decoration.
+
+   Ranking reuses LexicalRetriever rather than growing a second notion of relevance, so search
+   and recommendation cannot drift apart. */
+const SEARCH_RESULTS = 10;
+
+function search(store: CanonStore, query: string): string {
+  if (!query.trim()) return "search needs a query.";
+  const articles: Candidate[] = [];
+  for (const path of store.list()) {
+    const article = store.read(path);
+    if (article) {
+      articles.push({
+        path,
+        capsule: article.capsule,
+        body: article.body,
+        updated: article.updated,
+        declared: article.scope === RULE_SCOPE,
+      });
+    }
+  }
+  /* Journal entries enter the same index under a `journal/` key so one ranking covers both.
+     The key is an index handle, never an address: it is not something `read` accepts. */
+  const entries = store.journalEntries();
+  const byKey = new Map<string, { logged: string; subjects: string[]; body: string }>();
+  const journal: Candidate[] = entries.map((entry) => {
+    const key = `journal/${entry.name.replace(/\.md$/, "")}`;
+    byKey.set(key, entry);
+    return {
+      path: key,
+      capsule: entry.subjects.join(", "),
+      body: entry.body,
+      updated: entry.logged,
+      declared: false,
+    };
+  });
+
+  const all = [...articles, ...journal];
+  if (!all.length) return "Nothing in the canon yet.";
+  const retriever = new LexicalRetriever();
+  retriever.index(all);
+  const scored = retriever.score(query, all);
+  const ranked = [...scored.entries()].sort((a, b) => b[1] - a[1]);
+  if (!ranked.length) return `Nothing matches "${query}".`;
+
+  const lines = ranked.slice(0, SEARCH_RESULTS).map(([key]) => {
+    const entry = byKey.get(key);
+    if (entry) {
+      const subjects = entry.subjects.length ? ` (${entry.subjects.join(", ")})` : "";
+      return `journal ${entry.logged}${subjects}: ${excerpt(entry.body)}`;
+    }
+    const article = store.read(key);
+    return `${key}: ${article?.capsule || excerpt(article?.body ?? "")}`;
+  });
+  /* Say what was dropped. A silent cap reads as "that is everything". */
+  if (ranked.length > SEARCH_RESULTS) {
+    lines.push(`... ${ranked.length - SEARCH_RESULTS} more matched; narrow the query to see them.`);
+  }
+  return lines.join("\n");
+}
+
+function excerpt(body: string): string {
+  const flat = body.replace(/\s+/g, " ").trim();
+  return flat.length > 160 ? `${flat.slice(0, 157)}...` : flat;
 }
 
 function run(runtime: CanonRuntime, params: Record<string, unknown>): string {
@@ -240,7 +319,9 @@ function run(runtime: CanonRuntime, params: Record<string, unknown>): string {
     }
     case "map":
       return store.map(path);
+    case "search":
+      return search(store, String(params.query ?? ""));
     default:
-      return `Unknown action "${action}". Actions: read, write, journal, map.`;
+      return `Unknown action "${action}". Actions: read, write, journal, map, search.`;
   }
 }

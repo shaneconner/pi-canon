@@ -283,6 +283,39 @@ export class CanonStore {
     }
   }
 
+  /* Every journal entry, with its body. Distinct from the index, which deliberately holds
+     no bodies so an article read never opens a journal file: this reads them all, and is
+     therefore only for the agent-solicited path, never the hot one. A journal entry has no
+     address, so what scopes it is its instant and the subjects it names. */
+  journalEntries(): { name: string; logged: string; subjects: string[]; body: string }[] {
+    let names: string[];
+    try {
+      names = readdirSync(this.journalDir).filter((name) => name.endsWith(".md"));
+    } catch {
+      return [];
+    }
+    const out = [];
+    for (const name of names.sort()) {
+      try {
+        const text = readFileSync(join(this.journalDir, name), "utf8");
+        /* The same two regexes CanonStore.row uses, deliberately. Journal front matter is
+           written as `subject: [a, b]`, which the generic parser does not return under
+           `meta`, so reading it a second way here would let search and the journal index
+           disagree about what an entry names. */
+        out.push({
+          name,
+          logged: /^logged:\s*(.*)$/m.exec(text)?.[1]?.trim() || name.slice(0, 10),
+          subjects: subjectList(/^subject:\s*(.*)$/m.exec(text)?.[1] ?? ""),
+          body: text.replace(/^---\n[\s\S]*?\n---\n/, ""),
+        });
+      } catch {
+        /* An unreadable entry is skipped, never fatal: search is a convenience and one
+           bad file must not make the whole journal unsearchable. */
+      }
+    }
+    return out;
+  }
+
   journalCount(): number {
     try {
       return readdirSync(this.journalDir).filter((name) => name.endsWith(".md")).length;

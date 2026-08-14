@@ -1365,4 +1365,55 @@ assert.deepEqual(unretained("Renamed the helper and tidied imports.", thin), [],
 pass("the value check stays silent with no article and with no values");
 
 
+/* Search: agent-solicited, and unlike surfacing it is not limited to addresses. Surfacing on
+   touch is address only; search reaches anything, journal entries included, and those have no
+   address at all. Every result has to carry what SCOPES it, because a result that does not is
+   the failure mode a 259 KB flat memory demonstrated: every needed fact delivered, still
+   answered wrong, because 201 answers to one question arrived with nothing saying which
+   situation each applied to. */
+const searched = await tools[0].execute(
+  "id", { action: "search", query: "config loading truth" }, undefined, undefined, ctx);
+assert.match(searched.content[0].text, /src\/core\/config/,
+  "an article result names the address that scopes it");
+pass("search finds an article and scopes it by address");
+
+const jstore = new CanonStore(mkdtempSync(join(tmpdir(), "canon-search-")));
+jstore.journal({ body: "The nightly close ran as ops-bot and misattributed 40,000 actions.",
+  slug: "attribution-incident", subject: ["ops/billing"] });
+jstore.write("ops/billing", { capsule: "Actor must be system: plus a registered id.",
+  body: "The quarterly report only treats a row as automated when the actor is registered." });
+const jtools = [];
+const jctx = { cwd: projDir };
+registerPiCanon(
+  { registerTool: (t) => jtools.push(t), on() {}, registerCommand() {} },
+  { root: jstore.root },
+);
+const hit = await jtools[0].execute(
+  "id", { action: "search", query: "ops-bot misattributed actions" }, undefined, undefined, jctx);
+const text = hit.content[0].text;
+assert.match(text, /^journal /m, "a journal entry is a first class search result");
+assert.match(text, /ops\/billing/, "and it carries the subjects that scope it");
+assert.doesNotMatch(text, /undefined/, "with no undefined fields in the rendering");
+pass("search reaches the journal, which has no address, and scopes it by instant and subject");
+
+const empty = await jtools[0].execute(
+  "id", { action: "search", query: "   " }, undefined, undefined, jctx);
+assert.match(empty.content[0].text, /needs a query/, "an empty query is refused, not run");
+const nothing = await jtools[0].execute(
+  "id", { action: "search", query: "zygomorphic thaumaturgy" }, undefined, undefined, jctx);
+assert.match(nothing.content[0].text, /Nothing matches/, "and no match says so");
+pass("search refuses an empty query and reports no match plainly");
+
+/* A cap that does not announce itself reads as "that is everything", which is the silent
+   truncation this project has been bitten by more than once. */
+for (let i = 0; i < 14; i += 1) {
+  jstore.write(`ops/widget${i}`, { capsule: `Widget ${i} batching.`, body: "batching rule for the widget." });
+}
+const cappedSearch = await jtools[0].execute(
+  "id", { action: "search", query: "batching widget rule" }, undefined, undefined, jctx);
+assert.match(cappedSearch.content[0].text, /more matched; narrow the query/,
+  "the cap announces how many it dropped");
+pass("search says what it truncated instead of implying it returned everything");
+
+
 console.log(`\nall ${gates} gates green`);
