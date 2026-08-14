@@ -529,30 +529,131 @@ assert.match(lexical, /policy\/rounding/, "the article the query touches surface
 assert.doesNotMatch(lexical, /policy\/timezones/, "one it does not touch stays put");
 pass("lexical retrieval surfaces an unaddressed article the intent reaches");
 
-/* The threshold is the precision knob: same store, same query, same retriever, and the
-   only thing that changes is how good a match has to be before it may spend a line.
-   The cutoffs are derived from the score this fixture actually produces rather than
-   written in as constants, because BM25 normalizes against the corpus and a later
-   article added anywhere above here would move the number and quietly turn one of these
-   two assertions into a tautology. */
-const thresholdIntent = [{ toolName: "shell", input: { command: "python reconciliation totals rounding check" } }];
-const thresholdCandidates = residue(store, projDir);
-const thresholdScorer = new LexicalRetriever();
-thresholdScorer.index?.(thresholdCandidates);
-const roundingScore = thresholdScorer
-  .score(intentQuery(thresholdIntent), thresholdCandidates)
-  .get("policy/rounding");
-assert.ok(roundingScore > 0.05 && roundingScore < 0.95, `a usable fixture score, got ${roundingScore}`);
+/* --- standout -------------------------------------------------------------------
+   The precision knob, and it is a ratio rather than a score on purpose: a lexical score
+   is a fraction of the query's idf mass, so the same article at the same relevance
+   scores differently depending on how much the agent said that turn, and differently
+   again on the next project. Its own fixture, because it needs a CROWD to stand out
+   from and the shared residue is two articles.
 
-const surfHigh = new Surfacer([{ name: "", dir: projDir, store }], new LexicalRetriever(), true, roundingScore + 0.01);
+   Nothing below is a written-in constant. Every cutoff is derived from the ratio this
+   fixture actually produces, because BM25 normalizes against the corpus and an article
+   added anywhere near here would move the number and quietly turn an assertion into a
+   tautology. */
+const crowdDir = join(work, "crowd");
+mkdirSync(crowdDir, { recursive: true });
+const crowdStore = new CanonStore(join(crowdDir, ".canon"));
+crowdStore.write("policy/rounding", {
+  capsule: "Ledger totals round half to even; never round half up in reconciliation.",
+  body: "Decided after a vendor reconciliation mismatch. Applies wherever money is summed.",
+});
+/* The crowd. Each shares some of the query's vocabulary without being what it is about,
+   which is what an ordinary turn does to a residue of project rules. */
+for (const [address, capsule] of [
+  ["policy/ledger-names", "A ledger column is named for what it holds, not for the job that filled it."],
+  ["policy/totals-review", "Any change to a totals query is reviewed by whoever owns the ledger."],
+  ["policy/check-order", "A check that can fail cheaply runs before one that cannot."],
+  ["policy/python-version", "The python in the runner is the python in the lockfile, always."],
+  ["policy/vendor-contact", "A vendor question goes to the partner channel, never to a person."],
+  /* Deep enough that spending a whole message of three still leaves more responders than
+     the cap. A shallower crowd cannot show a session going quiet, because running out of
+     candidates and declining them look identical from outside. */
+  ["policy/check-naming", "A check is named for the condition it asserts, not for the bug that prompted it."],
+  ["policy/totals-rerun", "A totals check that fails is re-run once before anyone is told."],
+  ["policy/python-imports", "The python check imports nothing the runner does not already install."],
+  ["policy/reconciliation-window", "A reconciliation covers a whole day, never a partial one."],
+  ["policy/python-runner-flags", "The python runner takes its flags from the file, never from the shell."],
+  ["policy/totals-precision", "A totals column keeps the precision it was stored with."],
+  ["policy/check-budget", "A check that takes longer than the build is moved out of the build."],
+  ["policy/reconciliation-owner", "A reconciliation has one owner, named in the runbook."],
+  ["policy/python-lint-scope", "The python lint runs over the whole package, never over one file."],
+]) crowdStore.write(address, { capsule, body: `${capsule} Recorded so it is not re-litigated.` });
+
+const crowdIntent = [{ toolName: "shell", input: { command: "python reconciliation totals rounding check" } }];
+const crowdCandidates = residue(crowdStore, crowdDir);
+const crowdScorer = new LexicalRetriever();
+crowdScorer.index?.(crowdCandidates);
+const crowdScores = [...crowdScorer.score(intentQuery(crowdIntent), crowdCandidates).values()]
+  .filter((s) => s > 0).sort((a, b) => b - a);
+/* The same arithmetic retrieve() does: the best article the per-message cap will not
+   carry, which is rank four when four or more responded. */
+assert.ok(crowdScores.length > 3, `the fixture needs more responders than the cap, got ${crowdScores.length}`);
+const crowdFloor = crowdScores[3];
+const reached = crowdScores[0] / crowdFloor;
+assert.ok(reached > 1.2, `a usable fixture ratio, got ${reached}`);
+
+const crowdMount = () => [{ name: "", dir: crowdDir, store: crowdStore }];
+const surfHigh = new Surfacer(crowdMount(), new LexicalRetriever(), true, reached + 0.05);
 surfHigh.noteIntent("shell", { command: "python reconciliation totals rounding check" });
 surfHigh.retrieve();
-assert.equal(surfHigh.flush(), undefined, "a match below the threshold rides nothing");
-const surfLow = new Surfacer([{ name: "", dir: projDir, store }], new LexicalRetriever(), true, roundingScore - 0.01);
+assert.equal(surfHigh.flush(), undefined, "a best match that does not stand out far enough rides nothing");
+const surfLow = new Surfacer(crowdMount(), new LexicalRetriever(), true, reached - 0.05);
 surfLow.noteIntent("shell", { command: "python reconciliation totals rounding check" });
 surfLow.retrieve();
-assert.match(surfLow.flush(), /policy\/rounding/, "a match above it still rides");
-pass("the threshold decides which ranked articles may spend a line");
+assert.match(surfLow.flush(), /policy\/rounding/, "one that stands out far enough still rides");
+pass("standout decides whether a query gets an answer at all");
+
+/* The default has to be the 1.0 behaviour exactly, and with a crowd present that is a
+   real claim rather than a restatement: at 1 the best article need only match the crowd,
+   which it always does, so nothing is cut that `score > 0` did not already cut. */
+const surfDefault = new Surfacer(crowdMount(), new LexicalRetriever());
+surfDefault.noteIntent("shell", { command: "python reconciliation totals rounding check" });
+surfDefault.retrieve();
+assert.match(surfDefault.flush(), /policy\/rounding/, "the default cuts nothing");
+pass("a standout of 1 is no cutoff at all");
+
+/* Fewer responders than the cap is the case with no crowd. Being one of a handful of
+   articles in the residue that share a word with what the agent is doing is the strongest
+   form of standing out, so they ride however high the bar is set. Silencing them would
+   make a small residue mute. */
+const surfAlone = new Surfacer([{ name: "", dir: projDir, store }], new LexicalRetriever(), true, 50);
+surfAlone.noteIntent("shell", { command: "python reconciliation totals rounding check" });
+surfAlone.retrieve();
+assert.match(surfAlone.flush(), /policy\/rounding/, "the only responder rides with no crowd to beat");
+pass("a lone responder stands out by default rather than being silenced");
+
+/* The decision is about what is LEFT to send. Once the articles that stood out have been
+   delivered, the same corpus has only the crowd left to offer, and the ratio falls. Measured
+   over the whole ranking instead, the best and fourth-best answers to a task the agent is
+   still working on are the same articles turn after turn, so the number never moves and the
+   cutoff can never go quiet however long a session runs.
+
+   Both turns are read out of the trace rather than recomputed here, and the cutoff is
+   derived from the pair, so this gate holds whatever the fixture happens to score. */
+const spentTraceFile = join(work, "standout-spent-trace.jsonl");
+const runTwoTurns = (standout, traceFile) => {
+  if (traceFile) process.env.PI_CANON_TRACE = traceFile;
+  const surf = new Surfacer(crowdMount(), new LexicalRetriever(), true, standout);
+  surf.noteIntent("shell", { command: "python reconciliation totals rounding check" });
+  surf.retrieve();
+  const first = surf.flush();
+  /* Deliberately empty of anything this corpus knows about. An earlier version of this
+     gate said "the window has rolled well past all of that", and `window` is a word in
+     policy/reconciliation-window, so the filler itself became the strongest match and the
+     ratio went UP on the second turn. */
+  surf.observe([{ role: "user", content: "let me step back and think about this differently" }]);
+  surf.noteIntent("shell", { command: "python reconciliation totals rounding recheck" });
+  surf.retrieve();
+  const second = surf.flush();
+  delete process.env.PI_CANON_TRACE;
+  return { first, second };
+};
+runTwoTurns(1, spentTraceFile);
+const spentRows = readFileSync(spentTraceFile, "utf8").trim().split("\n").map(JSON.parse)
+  .filter((row) => row.kind === "ranked");
+assert.equal(spentRows.length, 2, "one ranking per turn");
+assert.ok(
+  spentRows[1].reached < spentRows[0].reached,
+  `the ratio falls as the standout articles are spent: ${spentRows[0].reached} then ${spentRows[1].reached}`,
+);
+assert.ok(spentRows[1].eligible > 3, "and it fell because the crowd is flat, not because the crowd ran out");
+/* Between the two, so it is the same corpus and the same kind of question on both turns and
+   the only thing that changed is what is left to say. */
+const between = (spentRows[0].reached + spentRows[1].reached) / 2;
+const bothTurns = runTwoTurns(between);
+assert.match(bothTurns.first, /policy\/rounding/, "the standout article rides while it is there");
+assert.equal(bothTurns.second, undefined, "and the same corpus goes quiet once it is spent");
+pass("standout is measured on what is still eligible, so a session runs out of things worth saying");
 
 /* A guess is offered once a session. An address may come back when its asset is touched
    again, because the agent is working on it and no longer holds the article; a ranked
@@ -577,31 +678,51 @@ surfAgain.collect([join(projDir, "src/core/config.ts")]);
 assert.match(surfAgain.flush(), /src\/core\/config/, "a touched asset surfaces its article again");
 pass("a ranked guess is offered once a session; an address is not so limited");
 
-/* A threshold of 0 must not become "everything": the zero-score article is one the query
-   never touched at all, and admitting it because it cleared a cutoff of nothing would
-   turn the default into the worst setting available. */
-const surfZero = new Surfacer([{ name: "", dir: projDir, store }], new LexicalRetriever(), true, 0);
+/* The default must not become "everything": the zero-score article is one the query never
+   touched at all, and admitting it because no cutoff applied would turn the default into
+   the worst setting available. */
+const surfZero = new Surfacer([{ name: "", dir: projDir, store }], new LexicalRetriever(), true, 1);
 surfZero.noteIntent("shell", { command: "python reconciliation totals rounding check" });
 surfZero.retrieve();
 const atZero = surfZero.flush();
 assert.match(atZero, /policy\/rounding/);
-assert.doesNotMatch(atZero, /policy\/timezones/, "a zero score never clears a zero threshold");
-pass("a threshold of 0 admits what the query touched and nothing else");
+assert.doesNotMatch(atZero, /policy\/timezones/, "a zero score never rides for want of a cutoff");
+pass("the default admits what the query touched and nothing else");
 
-/* What a threshold removed is the number that says it is set too high, so it is traced
-   even though nothing was spent on it. */
-const cutTraceFile = join(work, "threshold-trace.jsonl");
+/* What a cutoff removed is the number that says it is set too high, so it is traced even
+   though nothing was spent on it. `reached` is the whole point of the record: it says how
+   far off the bar this query was, which is what a caller needs to move it. */
+const cutTraceFile = join(work, "standout-trace.jsonl");
 process.env.PI_CANON_TRACE = cutTraceFile;
-const surfCut = new Surfacer([{ name: "", dir: projDir, store }], new LexicalRetriever(), true, roundingScore + 0.01);
+const surfCut = new Surfacer(crowdMount(), new LexicalRetriever(), true, reached + 0.05);
 surfCut.noteIntent("shell", { command: "python reconciliation totals rounding check" });
 surfCut.retrieve();
 delete process.env.PI_CANON_TRACE;
 const cutRows = readFileSync(cutTraceFile, "utf8").trim().split("\n").map(JSON.parse)
-  .filter((row) => row.kind === "below-threshold");
+  .filter((row) => row.kind === "ranked");
 assert.equal(cutRows.length, 1);
-assert.equal(cutRows[0].count, 1, "the one article the query touched, and not the one it did not");
-assert.equal(cutRows[0].threshold, roundingScore + 0.01);
-pass("what the threshold removed is recorded, not silently dropped");
+assert.equal(cutRows[0].passed, false);
+assert.equal(cutRows[0].responders, crowdScores.length, "every article the query touched, and none it did not");
+assert.equal(cutRows[0].standout, reached + 0.05);
+assert.ok(Math.abs(cutRows[0].reached - reached) < 1e-9, "and how far the query actually got");
+pass("what the cutoff removed is recorded, not silently dropped");
+
+/* And the ranking that PASSED is recorded too, which is the reading that says a cutoff is
+   set too low. Inferring it afterwards from the scores that rode is not possible: the
+   crowd they beat is not in those lines. */
+const keptTraceFile = join(work, "standout-kept-trace.jsonl");
+process.env.PI_CANON_TRACE = keptTraceFile;
+const surfKept = new Surfacer(crowdMount(), new LexicalRetriever(), true, reached - 0.05);
+surfKept.noteIntent("shell", { command: "python reconciliation totals rounding check" });
+surfKept.retrieve();
+delete process.env.PI_CANON_TRACE;
+const keptRows = readFileSync(keptTraceFile, "utf8").trim().split("\n").map(JSON.parse)
+  .filter((row) => row.kind === "ranked");
+assert.equal(keptRows.length, 1);
+assert.equal(keptRows[0].passed, true);
+assert.ok(Math.abs(keptRows[0].reached - reached) < 1e-9, "how far a passing query got, not just that it passed");
+pass("every ranking records the ratio it reached, not only the ones that were cut");
+
 
 /* Ranked lines never displace an addressed one: the address is certain, the score is a
    guess, so the certainty leads the message. */
@@ -777,18 +898,19 @@ registerPiCanon(quietPi, { retrieval: "lexical" });
 registerPiCanon(quietPi, { retrieval: { name: "byo", score: () => new Map() } });
 pass("retrieval is validated at registration, built-in name or supplied scorer");
 
-/* A threshold that arrives unusable must throw rather than compare false against every
+/* A standout that arrives unusable must throw rather than compare false against every
    score, which would turn retrieval off and report nothing. NaN is the case that
    matters: it is a number, it is finite-looking to a lazy check, and every comparison
-   against it is false. */
-assert.throws(() => registerPiCanon(quietPi, { threshold: "0.4" }), /threshold must be/);
-assert.throws(() => registerPiCanon(quietPi, { threshold: NaN }), /threshold must be/);
-assert.throws(() => registerPiCanon(quietPi, { threshold: -0.1 }), /threshold must be/);
-assert.throws(() => registerPiCanon(quietPi, { threshold: 60 }), /threshold must be/);
-registerPiCanon(quietPi, { retrieval: "lexical", threshold: 0.4 });
-registerPiCanon(quietPi, { retrieval: "lexical", threshold: 0 });
-registerPiCanon(quietPi, { retrieval: "lexical", threshold: 1 });
-pass("a threshold outside 0 to 1 is refused at registration rather than silencing retrieval");
+   against it is false. 0.4 is the other one: it is what a caller writes who is still
+   thinking in scores, and clamping it would hand them silence in place of an answer. */
+assert.throws(() => registerPiCanon(quietPi, { standout: "2" }), /standout must be/);
+assert.throws(() => registerPiCanon(quietPi, { standout: NaN }), /standout must be/);
+assert.throws(() => registerPiCanon(quietPi, { standout: 0.4 }), /standout must be/);
+assert.throws(() => registerPiCanon(quietPi, { standout: Infinity }), /standout must be/);
+assert.throws(() => registerPiCanon(quietPi, { threshold: 0.4 }), /unknown option "threshold"/);
+registerPiCanon(quietPi, { retrieval: "lexical", standout: 1 });
+registerPiCanon(quietPi, { retrieval: "lexical", standout: 2.5 });
+pass("a standout below 1 is refused at registration rather than silencing retrieval");
 
 const handlers = {};
 const sent = [];

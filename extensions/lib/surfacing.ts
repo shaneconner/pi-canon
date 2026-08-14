@@ -141,14 +141,15 @@ export class Surfacer {
   private lastFlush = new Map<string, { capsule: string; stamp: string; asset: string; score?: number }>();
   private lastNudge: string[] = [];
 
-  /* The score a ranked article must reach to ride a message. See retrieve(). */
-  private threshold: number;
+  /* How far the best must beat the rest of the same query before anything rides. See
+     retrieve(). */
+  private standout: number;
 
-  constructor(mounts: Mount[], retriever: Retriever = NONE, resurface = true, threshold = 0) {
+  constructor(mounts: Mount[], retriever: Retriever = NONE, resurface = true, standout = 1) {
     this.mounts = mounts;
     this.retriever = retriever;
     this.resurface = resurface;
-    this.threshold = threshold;
+    this.standout = standout;
   }
 
   private get project(): Mount {
@@ -304,24 +305,24 @@ export class Surfacer {
 
   /* Rank the residue against this turn's intent and stage what the query touched.
 
-     `score > 0` is not a tuned threshold. With BM25 normalized against its saturation
+     `score > 0` is not a tuned cutoff. With BM25 normalized against its saturation
      ceiling it means "at least one query term appears in this article at all", which is
-     a property of the query rather than a constant someone picked. `threshold` is the
-     tuned cutoff, and it is the caller's rather than a constant here because it is the
-     one number whose right value depends on the corpus: how much of a project's memory
-     governs no asset, and how alike those articles are.
+     a property of the query rather than a constant someone picked. `standout` is the
+     tuned one, and it is the caller's rather than a constant here until a study has
+     priced it on a corpus with something worth finding in its residue.
 
-     The data that made it an option rather than a hypothetical: at threshold 0 a study
-     session was handed 28 ranked lines and opened 5, and the scores of the ones it
-     opened and the ones it ignored overlap but do separate (median 0.25 against 0.19),
-     which is the precondition a cutoff needs to be worth having. What that study cannot
-     say is where to put it, because every article in its residue was a distractor by
-     construction, so a higher open rate there would have been a worse outcome, not a
-     better one. Hence a default of 0, which changes nothing, and a knob rather than a
-     constant until a corpus with something worth finding in its residue has priced it.
+     There used to be an absolute threshold here, on the grounds that a study session was
+     handed 28 ranked lines and opened 5, and the scores of the opened and the ignored
+     overlapped but separated. That is the precondition a cutoff needs, and the shape it
+     was given was wrong. Read back across two studies the same cutoff had to be 0.25 on
+     one corpus and 0.03 on the other, and read WITHIN one session it moved by a factor
+     of four with nothing but how much the agent happened to say that turn. It was never
+     one quantity being tuned to three values. What it was really doing was silencing
+     whole queries rather than trimming tails, 82% of what it removed at its operating
+     point, so it is now written as the thing it was doing, in a unit that ports.
 
-     What IS bounded is how many of them ride one message, and that is a different thing
-     from a threshold. A threshold rules on relevance; this rules on transport. Sharing
+     What IS bounded is how many articles ride one message, and that is a different thing
+     from a cutoff. A cutoff rules on relevance; this rules on transport. Sharing
      one token with the query is enough to score above zero, so a residue of fifty rule
      articles and a query saying "export" stages fifty lines, and every one of them is
      unrequested context the agent never asked to spend. The address spine is exempt
@@ -365,14 +366,11 @@ export class Surfacer {
       return; /* a retriever that throws must never break the turn */
     }
     const scored = candidates
-      .map((candidate) => ({ candidate, score: scores.get(candidate.path) }))
-      .filter((entry) => typeof entry.score === "number" && entry.score > 0);
-    /* Both conditions, not one: `> 0` rules out an article the query never touched, and
-       the threshold rules out one it touched too lightly to be worth a line. At the
-       default of 0 the second is a no-op and the first still holds, so a zero-scoring
-       article never rides on the grounds that it cleared a cutoff of nothing. */
+      .map((candidate) => ({ candidate, score: scores.get(candidate.path) as number }))
+      .filter((entry) => typeof entry.score === "number" && entry.score > 0)
+      .sort((a, b) => b.score - a.score);
+    if (!scored.length) return;
     const ranked = scored
-      .filter((entry) => (entry.score as number) >= this.threshold)
       .filter((entry) => !this.seen.has(entry.candidate.path) && !this.staged.has(entry.candidate.path))
       /* Once a session, and never again. `seen` alone says "not while it is still in the
          window", which lets a guess the agent already declined come back the moment the
@@ -386,14 +384,61 @@ export class Surfacer {
          presence was tested against text that had never been delivered. That was a bug
          in a study build, but the only reason it could express itself as a repeat at all
          is that nothing here said once. */
-      .filter((entry) => !this.surfacedEver.has(entry.candidate.path))
-      .sort((a, b) => (b.score as number) - (a.score as number));
-    const cut = scored.length - scored.filter((entry) => (entry.score as number) >= this.threshold).length;
-    if (cut) {
-      /* Reported even though nothing was spent on it, because the number that says a
-         threshold is set too high is the one it silently removed. */
-      trace("below-threshold", { count: cut, threshold: this.threshold });
-    }
+      .filter((entry) => !this.surfacedEver.has(entry.candidate.path));
+    if (!ranked.length) return;
+    /* Is the best thing left here worth a line, or did the query merely brush the whole
+       residue at once? Measured against the crowd this same query raised rather than
+       against a number, for the reason in the option's own comment: a score is a fraction
+       of the query's idf mass, so it moves with how much the agent said this turn and with
+       how alike the corpus is, and a constant that is right on one project is wrong on the
+       next by a multiple.
+
+       The crowd is the best article that will NOT ride: rank RETRIEVED_PER_TURN + 1, the
+       one the cap is already about to leave behind. So the question is "does the best beat
+       what we were not going to send anyway", which needs no constant of its own and cannot
+       be set inconsistently with the cap.
+
+       Both terms come from what is still ELIGIBLE, after the articles already offered this
+       session are taken out, because the question is whether to spend a line on what is
+       left rather than on what was already delivered. Computed over the whole ranking
+       instead, it barely moves: the best and fourth-best answers to a task the agent is
+       still working on are the same articles turn after turn, so every turn of a study
+       session reported 1.81 to 2.00 whether it had anything new to offer or not. Against
+       the eligible set the same sessions separated, 1.68 to 1.81 on the rankings that
+       carried a decisive article and 1.00 to 1.28 on the rankings that did not, which is
+       the session going quiet as it uses up what was worth saying.
+
+       It is measured near the top of the ranking rather than at a quantile of it because a
+       real query is long. An agent's turn touches nearly the whole residue, 377 of 378
+       articles in a study session, so a tenth of the way down is deep in the mass sharing
+       one common word, and the ratio to it reports the shape of the corpus rather than
+       anything about this query: ordinary queries reached 2.64 to 3.28 there and the query
+       that had something to find reached 3.10, inside that range rather than above it.
+
+       The cost of tying it to the cap is that four articles genuinely relevant at once
+       silence each other. That is the same bet the cap already makes, and it is bounded the
+       same way: what is not sent stays eligible next turn.
+
+       Fewer eligible than the cap is the case with no crowd at all. They ride, because
+       being one of a handful of articles in the residue that share a word with what the
+       agent is doing is the strongest form of standing out, not the weakest. */
+    const crowd = ranked.length > RETRIEVED_PER_TURN ? ranked[RETRIEVED_PER_TURN].score : 0;
+    const reached = crowd > 0 ? ranked[0].score / crowd : Infinity;
+    const passed = reached >= this.standout;
+    /* Every ranking, not only the ones that were cut. The number that says a cutoff is set
+       too high is the one it silently removed, and the number that says it is set too low
+       is the ratio the queries reached anyway; a trace that only records refusals can
+       report the first and never the second. Both readings are needed to place it, and
+       neither survives being inferred from the scores that rode, because the crowd they
+       were measured against is not in those lines. */
+    trace("ranked", {
+      standout: this.standout,
+      reached: reached === Infinity ? null : reached,
+      responders: scored.length,
+      eligible: ranked.length,
+      passed,
+    });
+    if (!passed) return;
     /* What is already staged counts against the cap.
 
        undoFlush restages an undelivered message, and restaged entries are excluded from
