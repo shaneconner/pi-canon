@@ -1057,6 +1057,60 @@ await tools[0].execute("id", { action: "write", path: "src/newthing", body: "", 
 assert.equal(store.read("src/newthing").body.trim(), "New.");
 pass("an empty-string body or capsule leaves stored content untouched");
 
+/* The write-after check: a session that works on an asset and then records the rule it
+   was following is the one most likely to leave the two disagreeing, and a settle
+   reminder rides a turn that a session ending at the write never sees. The article here
+   is created BY the write, which is the measured case: at touch time there was nothing
+   to resolve to, so the check re-resolves at the write instead of looking touches up. */
+{
+  const checkDir = join(work, "checkback");
+  mkdirSync(join(checkDir, "ops"), { recursive: true });
+  writeFileSync(join(checkDir, "ops/billing.py"), "JOB = 'billing-close'\n");
+  const h = {};
+  const checkTools = [];
+  registerPiCanon(
+    { on: (n, f) => (h[n] ??= []).push(f), registerTool: (t) => checkTools.push(t), registerCommand() {}, sendMessage() {} },
+    {},
+  );
+  const checkCtx = { cwd: checkDir, ui: { notify() {} } };
+  for (const fn of h.session_start) fn({ reason: "startup" }, checkCtx);
+  for (const fn of h.tool_call) fn({ toolName: "edit", toolCallId: "c1", input: { path: join(checkDir, "ops/billing.py") } }, checkCtx);
+  const checkTraceFile = join(work, "check-back-trace.jsonl");
+  process.env.PI_CANON_TRACE = checkTraceFile;
+  const recorded = await checkTools[0].execute(
+    "id",
+    {
+      action: "write",
+      path: "ops/billing",
+      capsule: "Jobs register with the system: prefix.",
+      body: "The scheduler id is system:billing-close, prefix included.",
+    },
+    undefined, undefined, checkCtx,
+  );
+  delete process.env.PI_CANON_TRACE;
+  assert.match(recorded.content[0].text, /Check the asset as it stands does what the article says/,
+    "a write about a touched asset asks for the look back");
+  const checkRows = readFileSync(checkTraceFile, "utf8").trim().split("\n").map(JSON.parse)
+    .filter((row) => row.kind === "check-back");
+  assert.equal(checkRows.length, 1);
+  assert.equal(checkRows[0].path, "ops/billing", "the trace records which article asked");
+  const unrelated = await checkTools[0].execute(
+    "id",
+    { action: "write", path: "policy/naming", capsule: "Names are lowercase.", body: "Nothing here was touched." },
+    undefined, undefined, checkCtx,
+  );
+  assert.ok(!unrelated.content[0].text.includes("Check the asset"),
+    "an article about untouched territory is not nagged");
+  const again = await checkTools[0].execute(
+    "id",
+    { action: "write", path: "ops/billing", capsule: "Jobs register with the system: prefix.", body: "Amended." },
+    undefined, undefined, checkCtx,
+  );
+  assert.ok(!again.content[0].text.includes("Check the asset"),
+    "asked once a session, because asking twice teaches a reader to stop looking");
+  pass("recording a rule for a touched asset asks the session to check the asset obeys it");
+}
+
 store.write("src/capped", { capsule: "Capped.", body: "b" });
 for (let n = 1; n <= 5; n += 1) store.journal({ body: `Event ${n}.`, slug: "capped-event", subject: ["src/capped"] });
 const capped = await tools[0].execute("id", { action: "read", path: "src/capped" }, undefined, undefined, ctx);
