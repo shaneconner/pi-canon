@@ -343,6 +343,19 @@ export class Surfacer {
     const ranked = scored
       .filter((entry) => (entry.score as number) >= this.threshold)
       .filter((entry) => !this.seen.has(entry.candidate.path) && !this.staged.has(entry.candidate.path))
+      /* Once a session, and never again. `seen` alone says "not while it is still in the
+         window", which lets a guess the agent already declined come back the moment the
+         window rolls past it. An address may resurface, because a fresh touch means the
+         agent is working on that asset again and no longer has the article. A GUESS may
+         not: nothing new happened, the agent was offered it and passed, and asking twice
+         is what teaches a reader to stop looking.
+
+         Measured before it was changed: a build whose ranked line did not contain the
+         capsule re-offered 38% of its suggestions, 151 of 393 in one arm, because
+         presence was tested against text that had never been delivered. That was a bug
+         in a study build, but the only reason it could express itself as a repeat at all
+         is that nothing here said once. */
+      .filter((entry) => !this.surfacedEver.has(entry.candidate.path))
       .sort((a, b) => (b.score as number) - (a.score as number));
     const cut = scored.length - scored.filter((entry) => (entry.score as number) >= this.threshold).length;
     if (cut) {

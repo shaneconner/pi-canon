@@ -531,6 +531,29 @@ surfLow.retrieve();
 assert.match(surfLow.flush(), /policy\/rounding/, "a match above it still rides");
 pass("the threshold decides which ranked articles may spend a line");
 
+/* A guess is offered once a session. An address may come back when its asset is touched
+   again, because the agent is working on it and no longer holds the article; a ranked
+   article may not, because nothing new happened and the agent already passed on it.
+   Asking twice is what teaches a reader to stop looking. */
+const surfOnce = new Surfacer([{ name: "", dir: projDir, store }], new LexicalRetriever());
+surfOnce.noteIntent("shell", { command: "python reconciliation totals rounding check" });
+surfOnce.retrieve();
+assert.match(surfOnce.flush(), /policy\/rounding/, "it rides the first time");
+/* The window rolls past it: the projection no longer holds its mark, so it departs. */
+surfOnce.observe([{ role: "user", content: "something else entirely now" }]);
+surfOnce.noteIntent("shell", { command: "reconciliation rounding totals recheck please" });
+surfOnce.retrieve();
+assert.equal(surfOnce.flush(), undefined, "and never rides again, even once it has left the window");
+
+/* The address keeps its second chance, which is the behaviour that must NOT change. */
+const surfAgain = new Surfacer([{ name: "", dir: projDir, store }]);
+surfAgain.collect([join(projDir, "src/core/config.ts")]);
+assert.match(surfAgain.flush(), /src\/core\/config/);
+surfAgain.observe([{ role: "user", content: "unrelated" }]);
+surfAgain.collect([join(projDir, "src/core/config.ts")]);
+assert.match(surfAgain.flush(), /src\/core\/config/, "a touched asset surfaces its article again");
+pass("a ranked guess is offered once a session; an address is not so limited");
+
 /* A threshold of 0 must not become "everything": the zero-score article is one the query
    never touched at all, and admitting it because it cleared a cutoff of nothing would
    turn the default into the worst setting available. */
