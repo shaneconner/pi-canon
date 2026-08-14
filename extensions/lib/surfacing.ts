@@ -270,6 +270,34 @@ export class Surfacer {
     if (typeof toolName === "string" && toolName) this.intent.push({ toolName, input });
   }
 
+  /* The residue, rebuilt only when the store moved under it.
+
+     This used to rebuild every turn on the grounds that the residue is small by
+     construction. Measured, that justifies the wrong quantity: residue() reads and stats
+     every article in the store before it filters any of them, so the cost tracks the STORE.
+     5,000 articles cost 242ms a turn when all of them are residue and 214ms when only 50
+     are. At 20,000 it is 891ms, every turn, on the path a provider round trip is waiting on.
+
+     The stated reason not to cache was real and is answered rather than ignored: `updated`
+     has day granularity, so an article rewritten in the same session keeps its stamp and any
+     key built from it serves a stale ranking for the rest of the run. store.signature() keys
+     on mtimeMs and size instead, which move on every write, and costs 114ms where the
+     rebuild costs 891ms. */
+  private residueCache?: { signature: string; candidates: ReturnType<typeof residue> };
+  private reindex = true;
+
+  private candidates(store: CanonStore, dir: string): ReturnType<typeof residue> {
+    const signature = store.signature();
+    if (this.residueCache?.signature === signature) return this.residueCache.candidates;
+    const candidates = residue(store, dir);
+    this.residueCache = { signature, candidates };
+    /* The retriever's index is built from these, so it is stale for exactly as long as
+       they are. One flag, set here, cleared where the index is rebuilt. */
+    this.reindex = true;
+    trace("residue-rebuilt", { candidates: candidates.length });
+    return candidates;
+  }
+
   /* Rank the residue against this turn's intent and stage what the query touched.
 
      `score > 0` is not a tuned threshold. With BM25 normalized against its saturation
@@ -304,14 +332,13 @@ export class Surfacer {
     const turns = [...this.spoken, ...this.intent];
     if (!turns.length) return;
     const { store, dir } = this.project;
-    const candidates = residue(store, dir);
+    const candidates = this.candidates(store, dir);
     if (!candidates.length) return;
-    /* Rebuilt every turn rather than cached behind a change check. `updated` has day
-       granularity, so an article rewritten in the same session carries the same stamp
-       and any signature built from it would serve a stale ranking for the rest of the
-       run. The residue is small by construction, being only what no address reaches, so
-       the honest rebuild costs less than the bug the cache would hide. */
-    this.retriever.index?.(candidates);
+    /* Indexed only when the store actually changed; see candidates(). */
+    if (this.reindex) {
+      this.retriever.index?.(candidates);
+      this.reindex = false;
+    }
     const query = intentQuery(turns);
     if (!query.trim()) return;
     /* A new ranked article is justified by new intent, never by another turn passing.

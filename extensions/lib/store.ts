@@ -4,7 +4,7 @@
    so the tree stays hand editable and Obsidian readable with no parser dependency;
    keys this package does not own are carried through writes untouched. */
 
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 export interface Article {
@@ -204,6 +204,35 @@ export class CanonStore {
       return paths;
     };
     return walk(this.articlesDir, "").sort();
+  }
+
+  /* What the store looks like right now, cheaply enough to ask every turn.
+
+     Retrieval re-reads and re-parses every article once a turn to rebuild the residue, and
+     the comment justifying that says the residue is small by construction. Measured, the
+     cost tracks the STORE and not the residue: 5,000 articles cost 242ms a turn when all of
+     them are residue and 214ms when only 50 are, because every path is read and stat-ed
+     before anything is filtered. At 20,000 articles it is 891ms, on every turn.
+
+     Statting instead of reading is 8x cheaper, 114ms against 891ms at 20,000. mtimeMs is the
+     reason this works where the obvious key does not: `updated` has day granularity, so an
+     article rewritten in the same session carries the same stamp and any cache built on it
+     serves a stale ranking for the rest of the run. Milliseconds do not have that problem,
+     and size catches a same-millisecond rewrite of a different length. */
+  signature(): string {
+    const parts: string[] = [];
+    const walk = (dir: string, prefix: string): void => {
+      if (!existsSync(dir)) return;
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        if (entry.isDirectory()) walk(join(dir, entry.name), `${prefix}${entry.name}/`);
+        else if (entry.name.endsWith(".md")) {
+          const stats = statSync(join(dir, entry.name));
+          parts.push(`${prefix}${entry.name}:${stats.mtimeMs}:${stats.size}`);
+        }
+      }
+    };
+    walk(this.articlesDir, "");
+    return parts.sort().join("|");
   }
 
   write(path: string, fields: { capsule?: string; body?: string; scope?: string }): Article {

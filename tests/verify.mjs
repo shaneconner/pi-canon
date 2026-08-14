@@ -1154,6 +1154,27 @@ surfReindex.retrieve();
 assert.match(indexedWith, /caps at 1000/, "a same-day rewrite still reindexes");
 pass("the retrieval index never goes stale against a same-session rewrite");
 
+/* And it does not rebuild when nothing moved. Without this the cache could be inert and
+   every gate would still pass, which is how a check ends up costing nothing and proving
+   nothing. Counting index() calls is the only way to see the work that did not happen. */
+let indexCalls = 0;
+const counting = {
+  name: "counting",
+  index: () => { indexCalls += 1; },
+  score: () => new Map(),
+};
+const surfCache = new Surfacer([{ name: "", dir: join(work, "reindex"), store: reindexStore }], counting);
+for (const command of ["one thing", "another thing", "a third thing"]) {
+  surfCache.noteIntent("shell", { command });
+  surfCache.retrieve();
+}
+assert.equal(indexCalls, 1, `three turns, one index build, got ${indexCalls}`);
+reindexStore.write("policy/two", { capsule: "A new article appears.", body: "b" });
+surfCache.noteIntent("shell", { command: "after the write" });
+surfCache.retrieve();
+assert.equal(indexCalls, 2, "a store that changed rebuilds exactly once more");
+pass("the residue is rebuilt when the store moves and not otherwise");
+
 
 
 /* --- the user's own words --------------------------------------------------------
