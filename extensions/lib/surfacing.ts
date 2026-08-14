@@ -142,10 +142,13 @@ export class Surfacer {
   private lastNudge: string[] = [];
 
   /* How far the best must beat the rest of the same query before anything rides. See
-     retrieve(). */
+     retrieve(). The default is an operating point priced by a 120-cell study rather than
+     picked: at 1.4 a session kept every rule fact the uncut channel delivered at a ninth
+     of the suggestion volume, and a store with nothing relevant never reached it. 1 turns
+     the cutoff off. */
   private standout: number;
 
-  constructor(mounts: Mount[], retriever: Retriever = NONE, resurface = true, standout = 1) {
+  constructor(mounts: Mount[], retriever: Retriever = NONE, resurface = true, standout = 1.4) {
     this.mounts = mounts;
     this.retriever = retriever;
     this.resurface = resurface;
@@ -308,8 +311,9 @@ export class Surfacer {
      `score > 0` is not a tuned cutoff. With BM25 normalized against its saturation
      ceiling it means "at least one query term appears in this article at all", which is
      a property of the query rather than a constant someone picked. `standout` is the
-     tuned one, and it is the caller's rather than a constant here until a study has
-     priced it on a corpus with something worth finding in its residue.
+     tuned one. A 120-cell study priced it on a corpus with something worth finding in
+     its residue, and 1.4 held every fact the uncut channel delivered at a ninth of the
+     volume; that is the default, and the caller moves it against their own trace.
 
      There used to be an absolute threshold here, on the grounds that a study session was
      handed 28 ranked lines and opened 5, and the scores of the opened and the ignored

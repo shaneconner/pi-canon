@@ -536,10 +536,12 @@ pass("lexical retrieval surfaces an unaddressed article the intent reaches");
    again on the next project. Its own fixture, because it needs a CROWD to stand out
    from and the shared residue is two articles.
 
-   Nothing below is a written-in constant. Every cutoff is derived from the ratio this
+   Nothing below is a written-in constant except the shipped default itself, which the
+   default gate pins on purpose. Every other cutoff is derived from the ratio this
    fixture actually produces, because BM25 normalizes against the corpus and an article
    added anywhere near here would move the number and quietly turn an assertion into a
-   tautology. */
+   tautology. The default gate additionally requires the fixture's two turns to straddle
+   the default, and says so when an added article drifts them. */
 const crowdDir = join(work, "crowd");
 mkdirSync(crowdDir, { recursive: true });
 const crowdStore = new CanonStore(join(crowdDir, ".canon"));
@@ -593,13 +595,14 @@ surfLow.retrieve();
 assert.match(surfLow.flush(), /policy\/rounding/, "one that stands out far enough still rides");
 pass("standout decides whether a query gets an answer at all");
 
-/* The default has to be the 1.0 behaviour exactly, and with a crowd present that is a
-   real claim rather than a restatement: at 1 the best article need only match the crowd,
-   which it always does, so nothing is cut that `score > 0` did not already cut. */
-const surfDefault = new Surfacer(crowdMount(), new LexicalRetriever());
-surfDefault.noteIntent("shell", { command: "python reconciliation totals rounding check" });
-surfDefault.retrieve();
-assert.match(surfDefault.flush(), /policy\/rounding/, "the default cuts nothing");
+/* An explicit 1 has to be the no-cutoff behaviour exactly, and with a crowd present that
+   is a real claim rather than a restatement: at 1 the best article need only match the
+   crowd, which it always does, so nothing is cut that `score > 0` did not already cut.
+   This is the measurement setting every study's uncut arm runs on. */
+const surfExplicitOff = new Surfacer(crowdMount(), new LexicalRetriever(), true, 1);
+surfExplicitOff.noteIntent("shell", { command: "python reconciliation totals rounding check" });
+surfExplicitOff.retrieve();
+assert.match(surfExplicitOff.flush(), /policy\/rounding/, "an explicit 1 cuts nothing");
 pass("a standout of 1 is no cutoff at all");
 
 /* Fewer responders than the cap is the case with no crowd. Being one of a handful of
@@ -655,6 +658,25 @@ assert.match(bothTurns.first, /policy\/rounding/, "the standout article rides wh
 assert.equal(bothTurns.second, undefined, "and the same corpus goes quiet once it is spent");
 pass("standout is measured on what is still eligible, so a session runs out of things worth saying");
 
+/* The shipped default is the operating point a 120-cell study priced, not a neutral 1:
+   it admits the ranking that has something decisive to offer and goes quiet once the
+   store is spent. Both readings ride the fixture's live ratios, so the gate first checks
+   the two turns still straddle the default; an article added to the crowd can drift
+   them, and that failure should say so rather than read as a package regression. */
+const defaultTraceFile = join(work, "standout-default-trace.jsonl");
+const defaultTurns = runTwoTurns(undefined, defaultTraceFile);
+const defaultRows = readFileSync(defaultTraceFile, "utf8").trim().split("\n").map(JSON.parse)
+  .filter((row) => row.kind === "ranked");
+assert.equal(defaultRows.length, 2, "one ranking per turn");
+assert.equal(defaultRows[0].standout, 1.4, "the shipped default, the value the study priced");
+assert.ok(defaultRows[0].reached >= 1.4,
+  `fixture drift: the decisive turn must reach the default, got ${defaultRows[0].reached}`);
+assert.ok(defaultRows[1].reached < 1.4,
+  `fixture drift: the spent turn must fall short of the default, got ${defaultRows[1].reached}`);
+assert.match(defaultTurns.first, /policy\/rounding/, "the default admits a decisive ranking");
+assert.equal(defaultTurns.second, undefined, "and goes quiet on a spent store");
+pass("the default standout is the studied operating point, not a disabled cutoff");
+
 /* A guess is offered once a session. An address may come back when its asset is touched
    again, because the agent is working on it and no longer holds the article; a ranked
    article may not, because nothing new happened and the agent already passed on it.
@@ -678,16 +700,16 @@ surfAgain.collect([join(projDir, "src/core/config.ts")]);
 assert.match(surfAgain.flush(), /src\/core\/config/, "a touched asset surfaces its article again");
 pass("a ranked guess is offered once a session; an address is not so limited");
 
-/* The default must not become "everything": the zero-score article is one the query never
-   touched at all, and admitting it because no cutoff applied would turn the default into
-   the worst setting available. */
+/* The off switch must not become "everything": the zero-score article is one the query
+   never touched at all, and admitting it because the cutoff is off would turn standout 1
+   into the worst setting available. */
 const surfZero = new Surfacer([{ name: "", dir: projDir, store }], new LexicalRetriever(), true, 1);
 surfZero.noteIntent("shell", { command: "python reconciliation totals rounding check" });
 surfZero.retrieve();
 const atZero = surfZero.flush();
 assert.match(atZero, /policy\/rounding/);
 assert.doesNotMatch(atZero, /policy\/timezones/, "a zero score never rides for want of a cutoff");
-pass("the default admits what the query touched and nothing else");
+pass("a standout of 1 admits what the query touched and nothing else");
 
 /* What a cutoff removed is the number that says it is set too high, so it is traced even
    though nothing was spent on it. `reached` is the whole point of the record: it says how
@@ -749,7 +771,9 @@ for (let i = 0; i < 9; i += 1) {
   });
 }
 const fanDir = join(work, "fan");
-const surfFan = new Surfacer([{ name: "", dir: fanDir, store: fanStore }], new LexicalRetriever());
+/* Standout off in both fan gates: their subject is the transport cap, and nine
+   near-identical articles never stand out from one another. */
+const surfFan = new Surfacer([{ name: "", dir: fanDir, store: fanStore }], new LexicalRetriever(), true, 1);
 surfFan.collect([join(fanDir, "src/feed/sync.ts")]);
 surfFan.noteIntent("shell", { command: "reconciliation rounding rule" });
 surfFan.retrieve();
@@ -779,7 +803,7 @@ pass("intent that moved releases the next ones, still capped");
    message will carry, so they count against the cap. They did not: they were invisible to
    the budget because the candidate filter skipped them, and four failed deliveries walked
    a three-line cap up to twelve. */
-const surfUndone = new Surfacer([{ name: "", dir: fanDir, store: fanStore }], new LexicalRetriever());
+const surfUndone = new Surfacer([{ name: "", dir: fanDir, store: fanStore }], new LexicalRetriever(), true, 1);
 surfUndone.noteIntent("shell", { command: "reconciliation rounding rule" });
 surfUndone.retrieve();
 const before = surfUndone.flush().split("\n").filter((l) => l.startsWith("policy/")).length;

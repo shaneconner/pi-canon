@@ -65,9 +65,12 @@ export function registerPiCanon(pi: any, options: CanonOptions = {}): void {
      retrieval off without saying so, which is the one failure a tuning knob must not
      have. Below 1 is refused rather than clamped, because it asks for the best article
      to be WORSE than the crowd before it may ride, which nobody means. A caller who
-     wrote 0.4 was thinking of a score and wants to be told, not handed silence. */
-  const standout = options.standout ?? 1;
-  if (typeof standout !== "number" || !Number.isFinite(standout) || standout < 1) {
+     wrote 0.4 was thinking of a score and wants to be told, not handed silence. Omitted
+     entirely, the Surfacer's own default applies, so the shipped value lives in exactly
+     one place. */
+  const standout = options.standout;
+  if (standout !== undefined
+    && (typeof standout !== "number" || !Number.isFinite(standout) || standout < 1)) {
     throw new Error(
       `pi-canon: standout must be a number of at least 1, a multiple of what the rest of the query scored rather than a score; got ${
         typeof standout === "number" ? standout : typeof standout
