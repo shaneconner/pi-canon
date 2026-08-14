@@ -453,16 +453,39 @@ surfEsc.observe([{ role: "toolResult", content: `src/delim\ncapsule: Delimiters.
 assert.equal(surfEsc.stats.present, 1, "and the real text still reads as present");
 pass("a literal escape sequence is content, not whitespace to be erased");
 
-/* A capsule too short to be distinctive is never expired: a missed re-surface costs
-   one nudge that does not happen, a false expiry spams the window every turn. */
+/* Text too short to be distinctive is never expired: a missed re-surface costs one nudge
+   that does not happen, a false expiry spams the window every turn. That guard applies to
+   what actually entered the window, and a SURFACED line always carries its own address, so
+   it is always distinctive enough to test however terse its capsule. "Cache." fingerprints
+   to 5 characters; its line to 39. */
 store.write("src/core/terse", { capsule: "Cache.", body: "b" });
 writeFileSync(join(projDir, "src/core/terse.ts"), "export const z = 3;\n");
 const surfTerse = new Surfacer([{ name: "", dir: projDir, store }]);
 surfTerse.collect([join(projDir, "src/core/terse.ts")]);
 surfTerse.flush();
 surfTerse.observe([{ role: "user", content: "unrelated" }]);
-assert.equal(surfTerse.stats.present, 1);
-pass("a capsule too short to test is never expired");
+assert.equal(surfTerse.stats.present, 0, "a terse capsule's LINE is still testable, so it expires");
+surfTerse.collect([join(projDir, "src/core/terse.ts")]);
+assert.match(surfTerse.flush(), /src\/core\/terse/, "and a fresh touch surfaces it again");
+
+/* A READ of a tiny article is where the guard still earns its place: capsule plus body is
+   seven characters, which is not distinctive, so it is never expired. */
+const surfTinyRead = new Surfacer([{ name: "", dir: projDir, store }]);
+surfTinyRead.markSeen("src/core/terse", "Cache.\nb");
+surfTinyRead.observe([{ role: "user", content: "nothing like it here" }]);
+assert.equal(surfTinyRead.stats.present, 1, "too short to test, so never expired");
+pass("presence is tested against what entered the window, and short text is never expired");
+
+/* An article with no capsule surfaces as a pointer. Remembering the capsule remembered
+   nothing at all, which left it seen for the rest of the session. */
+store.write("src/core/other", { capsule: "", body: "No capsule on purpose." });
+const surfPointer = new Surfacer([{ name: "", dir: projDir, store }]);
+surfPointer.collect([join(projDir, "src/core/other.ts")]);
+assert.match(surfPointer.flush(), /src\/core\/other/, "it surfaces as a pointer");
+surfPointer.observe([{ role: "user", content: "the window has rolled past it" }]);
+surfPointer.collect([join(projDir, "src/core/other.ts")]);
+assert.match(surfPointer.flush(), /src\/core\/other/, "and can surface again once it is gone");
+pass("an article with no capsule is not marked seen forever");
 
 /* --- retrieval ------------------------------------------------------------------
    The residue is what the spine can never reach: articles at addresses that govern no

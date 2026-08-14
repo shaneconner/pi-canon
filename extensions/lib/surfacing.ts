@@ -37,12 +37,16 @@ const PATHLIKE = /(?:^|[\s"'`=:,([{])(\/?[\w.@-]+(?:\/[\w.@-]+)+)/g;
    or compacts, the two come apart, and the agent is not aware of what was folded
    away. So seen is checked against the projection rather than remembered.
 
-   A mark is a normalized slice of what the article put in the window. Normalizing
-   both sides to lowercase alphanumerics survives JSON escaping, whitespace
-   rewrapping, and quoting differences between however the projection is rendered and
-   however we wrote it. A short mark is not distinctive enough to test, so it is never
-   expired; failing to expire only costs a re-surface that does not happen, while a
-   false expiry would spam the window.
+   A mark is a normalized slice of what the article put in the window, and the caller
+   passes exactly that: the LINE for a surfaced article, capsule plus body for a read.
+   Passing anything else is the one way to break this, because presence then tests for
+   text that was never shown. Normalizing both sides to lowercase alphanumerics survives
+   JSON escaping, whitespace rewrapping, and quoting differences between however the
+   projection is rendered and however we wrote it. A short mark is not distinctive enough
+   to test, so it is never expired; failing to expire only costs a re-surface that does
+   not happen, while a false expiry would spam the window. A surfaced line always carries
+   its own address and so is always long enough; only a read of a very small article is
+   not.
 
    A mark has two parts and BOTH must be in the projection.
 
@@ -480,7 +484,21 @@ export class Surfacer {
         via: entry.score === undefined ? "address" : this.retriever.name,
       });
       this.seen.add(path);
-      this.remember(path, entry.capsule);
+      /* The LINE, which is what actually entered the window. Remembering the capsule
+         instead was right only while every line happened to contain its capsule, and two
+         cases break that. An article with no capsule surfaces as a pointer, so the mark was
+         built from an empty string, fell under MARK_MINIMUM, and left the article seen for
+         the rest of the session: it could never surface again however long ago it left the
+         window. A build whose ranked line did not carry the capsule hit the mirror image,
+         testing for text that had never been shown and reading as departed every turn.
+         Both are the same mistake, which is testing presence against something other than
+         what was delivered.
+
+         This also retires the workaround the short-capsule case needed. A line always
+         carries its own address, so it always clears MARK_MINIMUM: `Cache.` fingerprints to
+         5 characters and its line to 39. The guard still earns its place on the other call
+         site, where a read of a tiny article really can be too short to test. */
+      this.remember(path, line);
       this.lastFlush.set(path, entry);
       this.staged.delete(path);
     }
