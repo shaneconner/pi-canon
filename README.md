@@ -82,7 +82,7 @@ pi-canon is an increment on the pattern rather than a replacement for it, and it
 
 **A spine**, the addressing convention. An article's address is computed from the asset instead of searched for, and nothing has to be configured for that mapping to hold, which makes the spine a convention rather than a mode. It is also why nothing in the RECALL path searches: when a touch already decided the address, there is nothing to find. The `search` action exists for the opposite direction, the agent that wants to ask, and it never runs unasked.
 
-**Surfacing**, push rather than pull. When a tool call is detected touching a governed asset, that article's capsule is staged for the session, at most once per article, so nobody has to think to ask. Detection of a path inside a tool call is best effort. Resolution, once a path is in hand, is not.
+**Surfacing**, push rather than pull. When a tool call is detected touching a governed asset, that article's capsule is staged for the session, at most once per article while it stays in context (see Surfacing), so nobody has to think to ask. Detection of a path inside a tool call is best effort. Resolution, once a path is in hand, is not.
 
 The evaluation below does not test that lineage argument: no evaluated arm is a search-driven LLM wiki, so nothing here shows pi-canon beats a disciplined one.
 
