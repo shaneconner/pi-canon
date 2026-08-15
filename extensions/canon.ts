@@ -29,8 +29,10 @@ export interface CanonOptions {
   retrieval?: RetrievalOption;
   /* How far the best-ranked article must stand out from the rest of what this same
      query touched before it may ride a message. A multiple, not a score: 2 means the
-     best must score twice the article at the 90th percentile of the ones that responded
-     at all. Default 1, which is no cutoff and is the 1.0 behavior exactly.
+     best must score twice the best article that will not ride, the one just past the
+     per-turn cap. Default 1.4, the operating point a 120-cell study priced: it kept
+     every fact the uncut channel delivered at a ninth of the suggestion volume. 1 is
+     no cutoff and is the 1.0 behavior exactly.
 
      Relative rather than absolute because an absolute cutoff is not the same quantity
      twice. A lexical score is a fraction of the query's whole idf mass, so it falls as

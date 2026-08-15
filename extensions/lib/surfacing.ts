@@ -159,13 +159,18 @@ export class Surfacer {
     return this.mounts[0];
   }
 
-  private mountFor(asset: string): Mount {
+  /* The mount an asset lives in, and the asset made absolute. Absolute because the
+     store strips its mount directory only as a leading prefix: handed a
+     project-relative path that reaches into a named mount, it would keep the whole
+     path and resolve a longer, wrong address inside that mount. The project mount is
+     indifferent, since project-relative IS its address space either way. */
+  private locate(asset: string): { mount: Mount; absolute: string } {
     const path = asset.replace(/\\/g, "/");
     const absolute = isAbsolute(path) ? path : join(this.project.dir, path);
     for (const mount of this.mounts.slice(1)) {
-      if (absolute === mount.dir || absolute.startsWith(`${mount.dir}/`)) return mount;
+      if (absolute === mount.dir || absolute.startsWith(`${mount.dir}/`)) return { mount, absolute };
     }
-    return this.project;
+    return { mount: this.project, absolute };
   }
 
   /* `entered` is everything the caller just put in the window for this article, not a
@@ -247,7 +252,11 @@ export class Surfacer {
 
   /* Candidate asset paths in a tool call: string values that are paths, and path
      shaped tokens inside them. A candidate needs to exist, or to have an existing
-     parent, so a file about to be created still surfaces its governing article. */
+     parent, so a file about to be created still surfaces its governing article. Two
+     stated edges of that rule. A touch is a claim of attention, not of effect: a path
+     that merely rides a payload counts, and so does a call some later hook blocks,
+     because this runs before execution. And a NEW file at the project root has no
+     parent segment in its path, so it is not seen until it exists. */
   pathsIn(input: unknown): string[] {
     const found = new Set<string>();
     const consider = (candidate: string) => {
@@ -483,8 +492,8 @@ export class Surfacer {
   /* Stage each newly touched governing article. Nothing is sent or spent here. */
   collect(assets: string[]): void {
     for (const asset of assets) {
-      const mount = this.mountFor(asset);
-      const article = mount.store.resolve(asset, mount.dir);
+      const { mount, absolute } = this.locate(asset);
+      const article = mount.store.resolve(absolute, mount.dir);
       if (!article) continue;
       const key = mount.name ? `${mount.name}:${article.path}` : article.path;
       this.pendingUpdates.add(key);

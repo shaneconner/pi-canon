@@ -1231,6 +1231,22 @@ surfLake.collect(surfLake.pathsIn({ command: `python etl.py ${join(lakeDir, "fun
 assert.match(surfLake.flush(), /lake:fundamentals\/market_cap \(updated .*\): Free-float market cap, daily/);
 pass("a mounted asset surfaces under its qualified address");
 
+/* The same store handed a project-relative path into the mount. The store strips the
+   mount dir as a prefix, so before locate() absolutized, this resolved the whole
+   relative path as an address inside the mount and found nothing. */
+const nestedDir = join(projDir, "vendor/lake2");
+mkdirSync(join(nestedDir, "fundamentals"), { recursive: true });
+writeFileSync(join(nestedDir, "fundamentals/spreads.csv"), "data\n");
+const nestedStore = new CanonStore(join(nestedDir, ".canon"));
+nestedStore.write("fundamentals/spreads", { capsule: "Bid-ask spreads, minute bars.", body: "Spread truths." });
+const surfNested = new Surfacer([
+  { name: "", dir: projDir, store },
+  { name: "lake2", dir: nestedDir, store: nestedStore },
+]);
+surfNested.collect(surfNested.pathsIn({ command: "python etl.py vendor/lake2/fundamentals/spreads.csv" }));
+assert.match(surfNested.flush(), /lake2:fundamentals\/spreads.*Bid-ask spreads/);
+pass("a project-relative reference into a named mount resolves in the mount's own address space");
+
 const entry = await jiti.import(join(projectRoot, "extensions/index.js"));
 const entryTools = [];
 entry.default({ on() {}, registerTool: (t) => entryTools.push(t), registerCommand() {} });
