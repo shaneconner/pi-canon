@@ -44,10 +44,10 @@ export interface CanonOptions {
      and a number never did.
 
      Raising it trades recall for precision, and precision is the side to protect,
-     though the measured argument is tokens rather than attention: the same study
-     found good suggestions opened at the same rate buried among twenty-seven as one
-     of four, so what the cutoff declines to spend is context on lines that were
-     never going to be read. Ignored when retrieval is "none". */
+     though the measured argument is tokens rather than attention: a companion
+     124-cell study found good suggestions opened at similar rates buried among
+     twenty-seven as one of four, so what the cutoff declines to spend is context on
+     lines that were never going to be read. Ignored when retrieval is "none". */
   standout?: number;
 }
 

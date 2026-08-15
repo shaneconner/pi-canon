@@ -1,5 +1,5 @@
-/* The pi_canon tool: one tool, four verbs. Read and update over create; the journal
-   for events; map to orient. */
+/* The pi_canon tool: one tool, five verbs. Read and update over create; the journal
+   for events; map to orient; search when the agent asks. */
 
 import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
