@@ -432,10 +432,29 @@ export class Surfacer {
        silence each other. That is the same bet the cap already makes, and it is bounded the
        same way: what is not sent stays eligible next turn.
 
-       Fewer eligible than the cap is the case with no crowd at all. They ride, because
-       being one of a handful of articles in the residue that share a word with what the
-       agent is doing is the strongest form of standing out, not the weakest. */
-    const crowd = ranked.length > RETRIEVED_PER_TURN ? ranked[RETRIEVED_PER_TURN].score : 0;
+       Fewer eligible than the cap is the case with no crowd at all. On a store that has
+       not been drawn down they ride, because being one of a handful of articles in the
+       residue that share a word with what the agent is doing is the strongest form of
+       standing out, not the weakest.
+
+       The eligible tail alone fails on one regime, measured on a real 33-article store:
+       once a session has consumed most of what the store had to say, the leftovers are a
+       tail of near-zero scores, so the ratio over them explodes onto junk (a 4.79 standout
+       on a 0.101-score best, with the ratio anti-correlating with relevance) and the
+       no-crowd rule above becomes a free ride for scores of 0.002. Small and drained look
+       identical from the eligible set; they differ in what was already delivered. So the
+       crowd takes a floor at the best CONSUMED responder, the strongest article this same
+       query raised among those already delivered this session: to spend a line, the best
+       thing left must beat what the query would have re-raised if it could. A genuinely
+       new topic clears that floor, because the old articles score weakly on its query; a
+       drained tail does not, because the leftovers score below the delivered on every
+       query. A fresh store has consumed nothing and keeps the free ride. The floor exists
+       only while the cutoff does: an explicit 1 is the no-cutoff measurement setting and
+       stays the 1.0 behavior exactly, drained or not. */
+    const eligiblePaths = new Set(ranked.map((entry) => entry.candidate.path));
+    const consumed = scored.find((entry) => !eligiblePaths.has(entry.candidate.path));
+    const tail = ranked.length > RETRIEVED_PER_TURN ? ranked[RETRIEVED_PER_TURN].score : 0;
+    const crowd = this.standout > 1 ? Math.max(tail, consumed?.score ?? 0) : tail;
     const reached = crowd > 0 ? ranked[0].score / crowd : Infinity;
     const passed = reached >= this.standout;
     /* Every ranking, not only the ones that were cut. The number that says a cutoff is set

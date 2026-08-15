@@ -615,6 +615,67 @@ surfAlone.retrieve();
 assert.match(surfAlone.flush(), /policy\/rounding/, "the only responder rides with no crowd to beat");
 pass("a lone responder stands out by default rather than being silenced");
 
+/* --- the drained-store guard ------------------------------------------------------
+   A lone responder on a FRESH store is the strongest form of standing out; the same
+   shape on a DRAINED store is the junk pump a replay on a real 33-article store
+   measured: with everything good already delivered, the leftovers ride tails of
+   near-zero scores, free when fewer than the cap respond. The guard floors the crowd
+   at the best consumed responder, so what is left must beat what this same query
+   would have re-raised. Everything below is derived from the fixture's own scores,
+   per the note at the top of this section. */
+const drainScores = crowdScorer.score(intentQuery(crowdIntent), crowdCandidates);
+const drainResponders = crowdCandidates.map((c) => c.path)
+  .filter((p) => (drainScores.get(p) ?? 0) > 0)
+  .sort((a, b) => drainScores.get(b) - drainScores.get(a));
+assert.ok(drainResponders.length > 4, `the drain fixture needs a field to consume, got ${drainResponders.length}`);
+const weakest = drainResponders[drainResponders.length - 1];
+const drainedRatio = drainScores.get(weakest) / drainScores.get(drainResponders[0]);
+assert.ok(drainedRatio < 1.4, `the leftover must not beat the consumed field, got ${drainedRatio}`);
+
+const drainedAll = new Surfacer(crowdMount(), new LexicalRetriever(), true, 1.4);
+for (const path of drainResponders) {
+  if (path !== weakest) drainedAll.markSeen(path, "delivered earlier this session, held against its own text");
+}
+drainedAll.noteIntent("shell", { command: "python reconciliation totals rounding check" });
+drainedAll.retrieve();
+assert.equal(drainedAll.flush(), undefined, "a drained store's leftover no longer rides free");
+pass("the crowd floors at the best consumed responder, so a drained residue goes quiet");
+
+/* An explicit 1 stays the no-cutoff measurement setting even drained: the floor
+   belongs to the cutoff, and at 1 there is no cutoff to belong to. */
+const drainedOff = new Surfacer(crowdMount(), new LexicalRetriever(), true, 1);
+for (const path of drainResponders) {
+  if (path !== weakest) drainedOff.markSeen(path, "delivered earlier this session, held against its own text");
+}
+drainedOff.noteIntent("shell", { command: "python reconciliation totals rounding check" });
+drainedOff.retrieve();
+assert.match(drainedOff.flush(), new RegExp(weakest), "an explicit 1 cuts nothing, drained or not");
+pass("the drained-store guard does not touch the explicit-1 measurement setting");
+
+/* The floor must not silence a genuinely NEW topic after a drain: the consumed
+   articles score weakly on its query, so the new best clears them. Derived like the
+   rest: the gate names the fixture drift instead of quietly passing. */
+const lintIntent = [{ toolName: "shell", input: { command: "python lint scope whole package run" } }];
+const lintScores = crowdScorer.score(intentQuery(lintIntent), crowdCandidates);
+const spentTop = [...new Set([...drainResponders.slice(0, 3), "policy/python-version"])];
+const lintOrder = crowdCandidates.map((c) => c.path)
+  .filter((p) => (lintScores.get(p) ?? 0) > 0)
+  .sort((a, b) => lintScores.get(b) - lintScores.get(a));
+const lintTop = lintOrder.find((p) => !spentTop.includes(p));
+assert.ok(lintTop, "the lint query needs an eligible responder");
+const consumedOnLint = Math.max(...spentTop.map((p) => lintScores.get(p) ?? 0));
+assert.ok(consumedOnLint > 0, "the drained articles must respond to the new query, or the floor is idle");
+const lintEligible = lintOrder.filter((p) => !spentTop.includes(p));
+const lintTail = lintEligible.length > 3 ? lintScores.get(lintEligible[3]) : 0;
+const lintReached = lintScores.get(lintTop) / Math.max(lintTail, consumedOnLint);
+assert.ok(lintReached > 1.45, `the fixture's new topic must clear the floor with margin, got ${lintReached}`);
+const drainedNew = new Surfacer(crowdMount(), new LexicalRetriever(), true, 1.4);
+for (const path of spentTop) drainedNew.markSeen(path, "delivered earlier this session, held against its own text");
+drainedNew.noteIntent("shell", { command: "python lint scope whole package run" });
+drainedNew.retrieve();
+assert.match(drainedNew.flush(), new RegExp(lintTop), "a new topic rides through the consumed floor");
+pass("the drained-store guard spares a genuinely new topic");
+
 /* The decision is about what is LEFT to send. Once the articles that stood out have been
    delivered, the same corpus has only the crowd left to offer, and the ratio falls. Measured
    over the whole ranking instead, the best and fourth-best answers to a task the agent is
