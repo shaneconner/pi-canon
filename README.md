@@ -16,7 +16,7 @@ Or clone this repo into `~/.pi/agent/extensions/`. Node 22.18 or later, Pi 0.83 
 
 ## The first article
 
-Every session opens with one orientation line saying how many articles govern the project, or inviting the first one when the store is empty. From there it takes one tool call:
+A session is not greeted: through 0.2.0 every session opened with an orientation line, and a 2x2 experiment with an inert implementation priced that line at more first-pass correctness than the whole tool schema, so 0.2.1 deleted it. The tool description carries the doctrine instead. The first article takes one tool call:
 
 ```json
 { "action": "write",
@@ -80,7 +80,7 @@ pi-canon is an increment on the pattern rather than a replacement for it, and it
 
 **A journal**, append-only, one file per event. Agents log whether you want them to or not, and that impulse has to land somewhere that is not the reference page. The instruction on the way in is to record the source as it arrived, names and exact numbers included, because articles distill and only the journal keeps the original.
 
-**A spine**, the addressing convention. An article's address is computed from the asset instead of searched for, and nothing has to be configured for that mapping to hold, which makes the spine a convention rather than a mode. It is also why no part of the package searches: there is nothing to find when the path already decided the address.
+**A spine**, the addressing convention. An article's address is computed from the asset instead of searched for, and nothing has to be configured for that mapping to hold, which makes the spine a convention rather than a mode. It is also why nothing in the RECALL path searches: when a touch already decided the address, there is nothing to find. The `search` action exists for the opposite direction, the agent that wants to ask, and it never runs unasked.
 
 **Surfacing**, push rather than pull. When a tool call is detected touching a governed asset, that article's capsule is staged for the session, at most once per article, so nobody has to think to ask. Detection of a path inside a tool call is best effort. Resolution, once a path is in hand, is not.
 
@@ -100,7 +100,7 @@ Such an article may say so, with `scope: rule` on the write. Nothing filters on 
 
 ## The tool
 
-One tool, `pi_canon`, four actions.
+One tool, `pi_canon`, five actions: `read`, `write`, `journal`, `map`, and `search`.
 
 | action | parameters | does |
 |---|---|---|
@@ -145,7 +145,7 @@ export default function (pi) {
 Six keys, and any other throws at registration by name, because everything else is a constant on purpose.
 
 - **`root`** places the store. Absolute is used as given, relative joins the project cwd. Default `<project>/.canon`.
-- **`surface: false`** silences the orientation line, the per-turn flush, and the settle reminder. The `pi_canon` tool and `/pi-canon` stay registered and working.
+- **`surface: false`** silences the per-turn flush and the settle reminder. The `pi_canon` tool and `/pi-canon` stay registered and working.
 - **`resurface: false`** returns an article to surfacing at most once per session however long ago it left the window. The default is `true`: an article counts as seen only while it is still in the context the provider receives, so one folded or compacted away surfaces again the next time its asset is touched. A fresh touch is what brings it back, so nothing re-surfaces on its own.
 - **`retrieval`** ranks the articles that govern no asset, the one category the address spine can never reach, against what the agent is doing. The default is `"none"`, which ranks nothing and surfaces nothing unaddressed: the spine alone, exactly as 1.0. `"lexical"` is BM25 over the standard library, no dependency and no model. Anything that needs a model is supplied here as `{ name, score, index? }`, so this package never carries one and never decides which you run. With a retriever configured the tool's filing rule changes with it, because the advice costs knowledge in either direction. On the default it says knowledge filed off the asset path never surfaces, which is true and is why you should not file it there. With a retriever it says the opposite: a constraint governing many assets and owning none belongs at its own address naming the rule, because the only parent unrelated packages share is the root and a root article surfaces on every touch of anything.
 
@@ -184,7 +184,7 @@ Nothing in the package can compel an agent to keep a line it has decided to cut.
 
 What the package does not do, stated so nothing above reads as more than it is:
 
-- No search the agent can call. There is no query action and no grep. `map` is the only listing, and an asset resolves to its article by exact address or by the ancestor walk, never by ranking.
+- No search that runs unasked. `search` is an action the agent calls; touches resolve to articles by exact address or the ancestor walk, never by ranking, and no query ever fires on the agent's behalf.
 - No embeddings and no model. `retrieval: "lexical"` builds a BM25 index over the articles that govern no asset, and nothing else is ranked ever; any other ranker is a function the caller supplies.
 - No filesystem watching, and no staleness detection: `updated` is the date of the last write and is never compared against the asset.
 - No delete and no rename. Removing or moving an article is a file operation you perform.
@@ -245,4 +245,4 @@ That is development evidence over two arms of one run and it carries no confirma
 - The narrative version: [My agents' wiki was written faster than it was read](https://medium.com/@shane.conner/my-agents-wiki-was-written-faster-than-it-was-read-and-what-was-read-sold-me-back-debt-i-had-a8085319c68b).
 - [pi-fold](https://github.com/shaneconner/pi-fold), a separate optional package serving the working tier. pi-canon ships the two persistent tiers of the same four-tier stack: the journal is the episodic tier, the canon the semantic tier. The two compose, neither requires the other, and neither knows what the other has spent.
 
-MIT. In a clone of this repo, `node tests/verify.mjs` runs the gate suite: it prints 67 named invariants and ends with `all 67 gates green`.
+MIT. In a clone of this repo, `node tests/verify.mjs` runs the gate suite: every invariant prints by name and the run must end `all N gates green`, 142 of them at this release.

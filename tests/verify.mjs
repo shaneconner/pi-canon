@@ -1019,30 +1019,28 @@ pass("registration wires the tool and the five events");
 const notices = [];
 const ctx = { cwd: projDir, ui: { notify: (msg, level) => notices.push({ msg, level }) } };
 for (const fn of handlers.session_start) fn({ reason: "startup" }, ctx);
-assert.equal(sent.length, 1);
-assert.match(sent[0].msg.content, /\d+ articles govern this project/);
-assert.equal(sent[0].opts.deliverAs, "nextTurn");
-pass("a session opens with one orientation line");
+assert.equal(sent.length, 0);
+pass("a session opens with nothing: the orientation line is gone and stays gone");
 
 for (const fn of handlers.tool_call) fn({ toolName: "read", toolCallId: "t1", input: { path: join(projDir, "src/core/config.ts") } }, ctx);
 for (const fn of handlers.tool_call) fn({ toolName: "read", toolCallId: "t2", input: { path: join(projDir, ".canon/articles/src/wikilinked.md") } }, ctx);
-assert.equal(sent.length, 1);
+assert.equal(sent.length, 0);
 for (const fn of handlers.turn_end) fn({ turnIndex: 0 }, ctx);
-assert.equal(sent.length, 2);
-assert.match(sent[1].msg.content, /Loads layered config/);
-assert.equal(sent[1].opts.deliverAs, "steer");
+assert.equal(sent.length, 1);
+assert.match(sent[0].msg.content, /Loads layered config/);
+assert.equal(sent[0].opts.deliverAs, "steer");
 pass("touches stage silently; the turn flushes one steer message");
 
 for (const fn of handlers.tool_call) fn({ toolName: "read", toolCallId: "t3", input: { path: join(projDir, "src/core/config.ts") } }, ctx);
 for (const fn of handlers.tool_call) fn({ toolName: "pi_canon", toolCallId: "t4", input: { action: "read", path: "src/core/config" } }, ctx);
 for (const fn of handlers.turn_end) fn({ turnIndex: 1 }, ctx);
-assert.equal(sent.length, 2);
+assert.equal(sent.length, 1);
 pass("repeat touches and pi_canon's own calls stay silent");
 
 for (const fn of handlers.agent_settled) fn(undefined, ctx);
-assert.equal(sent.length, 3);
-assert.match(sent[2].msg.content, /Touched but not updated/);
-assert.equal(sent[2].opts.deliverAs, "nextTurn");
+assert.equal(sent.length, 2);
+assert.match(sent[1].msg.content, /Touched but not updated/);
+assert.equal(sent[1].opts.deliverAs, "nextTurn");
 pass("settle delivers the write after reminder for the next turn");
 
 /* A send that throws must not leave the package believing the agent was told. Both
@@ -1162,7 +1160,7 @@ assert.match(bogus.content[0].text, /Unknown action "bogus"/);
 pass("map answers through the tool and unknown actions name themselves");
 
 for (const fn of handlers.agent_settled) fn(undefined, ctx);
-assert.equal(sent.length, 3);
+assert.equal(sent.length, 2);
 pass("a quiet session stays quiet");
 
 assert.equal(commands.length, 1);
@@ -1173,7 +1171,7 @@ assert.match(
   /articles, \d+ journal entries; \d+ surfaced this session, \d+ still in context taking \d+ chars/,
 );
 assert.equal(notices[0].level, "info");
-assert.equal(sent.length, 3);
+assert.equal(sent.length, 2);
 pass("the status command notifies the user and tells the model nothing");
 
 const coldDir = join(work, "cold-proj");
@@ -1185,9 +1183,8 @@ registerPiCanon(
   {},
 );
 for (const fn of coldHandlers.session_start) fn({ reason: "startup" }, { cwd: coldDir });
-assert.equal(coldSent.length, 1);
-assert.match(coldSent[0].msg.content, /No articles yet in .canon\//);
-pass("an empty store opens with the invitation to start it");
+assert.equal(coldSent.length, 0);
+pass("an empty store opens silently too; the tool description carries the invitation");
 
 assert.ok(advise({ ...back, capsule: "Added inventory pagination and stock aggregation." }, store)
   .some((a) => a.includes("change log")));
@@ -1348,8 +1345,8 @@ const singlePi = {
 };
 registerPiCanon(singlePi, {});
 for (const fn of handlers.single_session_start) fn({ reason: "startup" }, { cwd: singleDir, ui: { notify() {} } });
-assert.match(singleSent[0].msg.content, /1 article governs this project/);
-pass("the orientation line agrees with a single article");
+assert.equal(singleSent.length, 0);
+pass("a populated store opens silently as well: no branch of the old line survives");
 
 assert.match(tools[0].description, /shared parent/);
 pass("the tool description carries the filing rule");
@@ -1357,11 +1354,6 @@ pass("the tool description carries the filing rule");
 assert.match(tools[0].description, /names and exact numbers/);
 assert.match(tools[0].parameters.properties.body.description, /specifics beat summaries/);
 pass("the journal verb teaches source capture and write teaches specifics");
-
-assert.match(sent[0].msg.content, /journal the source/);
-assert.match(coldSent[0].msg.content, /journal the source/);
-assert.match(coldSent[0].msg.content, /Articles distill; the journal keeps the original/);
-pass("both orientation branches carry the journal-the-source doctrine");
 
 const traceFile = join(work, "trace.jsonl");
 process.env.PI_CANON_TRACE = traceFile;
