@@ -141,10 +141,11 @@ function filingTail(retrieval: string): string {
    though it has no address at all.
 
    Every result carries what SCOPES it, which is the one thing a result cannot be useful
-   without. A study of a 259 KB flat memory found sessions receiving every fact they needed
-   and still answering wrong, because a grep returned 201 answers to one question with nothing
-   saying which situation each applied to. For an article the scope is its address; for a
-   journal entry it is the instant and the subjects it named. Neither is decoration.
+   without. A study of a 259 KB flat memory found grep returning 201 occurrences of one
+   answer with nothing saying which subsystem each applied to; the sessions almost never
+   received the governing fact under its own scope, and scored accordingly. For an article
+   the scope is its address; for a journal entry it is the instant and the subjects it
+   named. Neither is decoration.
 
    Ranking reuses LexicalRetriever rather than growing a second notion of relevance, so search
    and recommendation cannot drift apart. */

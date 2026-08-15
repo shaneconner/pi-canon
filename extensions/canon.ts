@@ -30,9 +30,9 @@ export interface CanonOptions {
   /* How far the best-ranked article must stand out from the rest of what this same
      query touched before it may ride a message. A multiple, not a score: 2 means the
      best must score twice the best article that will not ride, the one just past the
-     per-turn cap. Default 1.4, the operating point a 120-cell study priced: it kept
-     every fact the uncut channel delivered at a ninth of the suggestion volume. 1 is
-     no cutoff and is the 1.0 behavior exactly.
+     per-turn cap. Default 1.4, the operating point a 120-cell study priced: it
+     matched the uncut channel's delivery to within that study's own noise floor at a
+     ninth of the suggestion volume. 1 is no cutoff and is the 1.0 behavior exactly.
 
      Relative rather than absolute because an absolute cutoff is not the same quantity
      twice. A lexical score is a fraction of the query's whole idf mass, so it falls as
@@ -43,9 +43,11 @@ export interface CanonOptions {
      Dividing by another score from the same query cancels both, which is why this ports
      and a number never did.
 
-     Raising it trades recall for precision, and precision is the side that matters: an
-     unsolicited line that is usually noise teaches the agent to skip the next one, and
-     that costs more than the tokens do. Ignored when retrieval is "none". */
+     Raising it trades recall for precision, and precision is the side to protect,
+     though the measured argument is tokens rather than attention: the same study
+     found good suggestions opened at the same rate buried among twenty-seven as one
+     of four, so what the cutoff declines to spend is context on lines that were
+     never going to be read. Ignored when retrieval is "none". */
   standout?: number;
 }
 
