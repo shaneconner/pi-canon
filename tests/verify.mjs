@@ -209,7 +209,7 @@ const first = surf.flush();
 assert.match(first, /src\/core\/config \(updated .*\): Loads layered config/);
 surf.collect(paths);
 assert.equal(surf.flush(), undefined);
-pass("a governing article surfaces once per session");
+pass("a governing article with a presence mark surfaces once while present");
 
 const surfBatch = new Surfacer([{ name: "", dir: projDir, store }]);
 surfBatch.collect([join(projDir, "src/core/config.ts")]);
@@ -454,10 +454,10 @@ assert.equal(surfEsc.stats.present, 1, "and the real text still reads as present
 pass("a literal escape sequence is content, not whitespace to be erased");
 
 /* Text too short to be distinctive is never expired: a missed re-surface costs one nudge
-   that does not happen, a false expiry spams the window every turn. That guard applies to
-   what actually entered the window, and a SURFACED line always carries its own address, so
-   it is always distinctive enough to test however terse its capsule. "Cache." fingerprints
-   to 5 characters; its line to 39. */
+   that does not happen, a false expiry spams the window every turn. The guard applies to
+   what actually entered through every path. An ordinary surfaced line carries its address
+   and date, so "Cache." fingerprints to 5 characters while its `src/core/terse` line reaches
+   39 and remains testable. */
 store.write("src/core/terse", { capsule: "Cache.", body: "b" });
 writeFileSync(join(projDir, "src/core/terse.ts"), "export const z = 3;\n");
 const surfTerse = new Surfacer([{ name: "", dir: projDir, store }]);
@@ -468,13 +468,31 @@ assert.equal(surfTerse.stats.present, 0, "a terse capsule's LINE is still testab
 surfTerse.collect([join(projDir, "src/core/terse.ts")]);
 assert.match(surfTerse.flush(), /src\/core\/terse/, "and a fresh touch surfaces it again");
 
-/* A READ of a tiny article is where the guard still earns its place: capsule plus body is
-   seven characters, which is not distinctive, so it is never expired. */
+/* A valid one-character address and capsule is the surfaced-line boundary: its dated line
+   fingerprints to 22 characters, below MARK_MINIMUM, so it conservatively stays seen. */
+const shortDir = join(work, "short-presence");
+mkdirSync(shortDir, { recursive: true });
+writeFileSync(join(shortDir, "a.ts"), "export const a = 1;\n");
+const shortStore = new CanonStore(join(shortDir, ".canon"));
+shortStore.write("a", { capsule: "x", body: "b" });
+const surfShortLine = new Surfacer([{ name: "", dir: shortDir, store: shortStore }]);
+surfShortLine.collect([join(shortDir, "a.ts")]);
+assert.match(surfShortLine.flush(), /a \(updated .*\): x/);
+surfShortLine.observe([{ role: "user", content: "unrelated" }]);
+assert.equal(surfShortLine.stats.present, 1, "an untestably short surfaced line stays seen");
+surfShortLine.collect([join(shortDir, "a.ts")]);
+assert.equal(surfShortLine.flush(), undefined, "and is not falsely expired on the next touch");
+
+/* Reads and writes use the same guard. */
 const surfTinyRead = new Surfacer([{ name: "", dir: projDir, store }]);
 surfTinyRead.markSeen("src/core/terse", "Cache.\nb");
 surfTinyRead.observe([{ role: "user", content: "nothing like it here" }]);
-assert.equal(surfTinyRead.stats.present, 1, "too short to test, so never expired");
-pass("presence is tested against what entered the window, and short text is never expired");
+assert.equal(surfTinyRead.stats.present, 1, "a tiny read is too short to test, so never expired");
+const surfTinyWrite = new Surfacer([{ name: "", dir: shortDir, store: shortStore }]);
+surfTinyWrite.markUpdated("a", "x\nb");
+surfTinyWrite.observe([{ role: "user", content: "nothing from the write remains" }]);
+assert.equal(surfTinyWrite.stats.present, 1, "a tiny write is too short to test, so never expired");
+pass("presence tests what entered, and untestably short text stays seen");
 
 /* An article with no capsule surfaces as a pointer. Remembering the capsule remembered
    nothing at all, which left it seen for the rest of the session. */
@@ -488,9 +506,10 @@ assert.match(surfPointer.flush(), /src\/core\/other/, "and can surface again onc
 pass("an article with no capsule is not marked seen forever");
 
 /* --- retrieval ------------------------------------------------------------------
-   The residue is what the spine can never reach: articles at addresses that govern no
-   asset on disk. Everything else is answered by address, for free, and must not be
-   ranked, or retrieval would compete with the address instead of completing it. */
+   The residue completes the spine: every off-spine article, plus a declared rule even
+   if an asset later appears at its address. Ordinary addressed articles are answered
+   by the spine and stay out, so retrieval completes address resolution rather than
+   competing with it. */
 
 store.write("policy/rounding", {
   capsule: "Ledger totals round half to even; never round half up in reconciliation.",
@@ -505,7 +524,7 @@ const free = residue(store, projDir).map((c) => c.path);
 assert.ok(free.includes("policy/rounding"), "an article governing no asset is residue");
 assert.ok(!free.includes("src/core/config"), "an article governing a real file is not");
 assert.ok(!free.includes("src/feed/sync"), "extension-dropped addresses still match their asset");
-pass("the residue is exactly the articles no asset address can reach");
+pass("the residue includes off-spine articles and excludes ordinary addressed ones");
 
 assert.equal(governsAnAsset(projDir, "src/core/config"), true);
 assert.equal(governsAnAsset(projDir, "src/core"), true, "a directory is an asset");
@@ -513,12 +532,12 @@ assert.equal(governsAnAsset(projDir, "policy/rounding"), false);
 assert.equal(governsAnAsset(projDir, "src/core/config.test"), false, "a longer stem is not a match");
 pass("an address governs an asset only when something on disk normalizes back to it");
 
-/* none is the control: 1.0 exactly, nothing unaddressed ever surfaces. */
+/* none is the control: 1.0 exactly, nothing surfaces by relevance. */
 const surfNone = new Surfacer([{ name: "", dir: projDir, store }]);
 surfNone.noteIntent("read", { file_path: "ledger/reconcile.py" });
 surfNone.retrieve();
 assert.equal(surfNone.flush(), undefined);
-pass("retrieval none never surfaces an unaddressed article");
+pass("retrieval none never surfaces a ranked article");
 
 /* lexical ranks the residue against this turn's intent. */
 const surfLex = new Surfacer([{ name: "", dir: projDir, store }], new LexicalRetriever());
@@ -527,7 +546,7 @@ surfLex.retrieve();
 const lexical = surfLex.flush();
 assert.match(lexical, /policy\/rounding/, "the article the query touches surfaces");
 assert.doesNotMatch(lexical, /policy\/timezones/, "one it does not touch stays put");
-pass("lexical retrieval surfaces an unaddressed article the intent reaches");
+pass("lexical retrieval surfaces an off-spine article the intent reaches");
 
 /* --- standout -------------------------------------------------------------------
    The precision knob, and it is a ratio rather than a score on purpose: a lexical score
@@ -1371,8 +1390,8 @@ pass("PI_CANON_TRACE audits the staged and flushed funnel");
 
 /* An article rewritten mid-session reindexes. `updated` has day granularity, so any
    change check built from it would call a same-session rewrite unchanged and serve a
-   stale ranking for the rest of the run. The residue is small by construction, so it is
-   rebuilt every turn instead. */
+   stale ranking for the rest of the run. The cache keys on the store signature instead,
+   so a write rebuilds once and an unchanged turn does not. */
 const reindexStore = new CanonStore(join(work, "reindex/.canon"));
 mkdirSync(join(work, "reindex"), { recursive: true });
 reindexStore.write("policy/one", { capsule: "Nothing about vendor pagination here.", body: "b" });
@@ -1466,7 +1485,7 @@ assert.equal(userIntent([{ role: "user", content: "short question" }])[0].conten
 pass("an over-long message keeps both ends and drops the middle");
 
 /* End to end: a question with no tool call at all still retrieves, which is exactly the
-   turn an unaddressed article is for. */
+   turn a relevance-ranked article is for. */
 const surfSpoken = new Surfacer([{ name: "", dir: projDir, store }], new LexicalRetriever());
 surfSpoken.observe([{ role: "user", content: "should reconciliation totals be rounding half up" }]);
 surfSpoken.retrieve();
@@ -1652,10 +1671,16 @@ pass("the residue reports which of its articles are rules on purpose");
 /* And a declaration has to survive the filesystem. Membership used to be decided by
    governsAnAsset alone, so the moment anything appeared at a declared rule's address
    the rule dropped out of the only mechanism that can reach it, silently. */
-writeFileSync(join(scopeDir, "policy"), "not a directory, just a name collision\n");
+mkdirSync(join(scopeDir, "policy"), { recursive: true });
+writeFileSync(join(scopeDir, "policy/audit-actor.ts"), "# asset at the rule's exact address\n");
+assert.equal(governsAnAsset(scopeDir, "policy/audit-actor"), true,
+  "the fixture must exercise an exact address collision");
 const collided = residue(scopeStore, scopeDir);
 assert.ok(collided.some((c) => c.path === "policy/audit-actor" && c.declared),
   "a declared rule stays retrievable when something collides with its address");
+scopeStore.write("policy/audit-actor", { scope: "" });
+assert.ok(!residue(scopeStore, scopeDir).some((c) => c.path === "policy/audit-actor"),
+  "without the declaration, an ordinary addressed article stays out of retrieval");
 pass("a declared rule survives an asset appearing at its address");
 
 /* --- values must survive distillation --------------------------------------------
@@ -1714,9 +1739,9 @@ pass("the value check stays silent with no article and with no values");
 /* Search: agent-solicited, and unlike surfacing it is not limited to addresses. Surfacing on
    touch is address only; search reaches anything, journal entries included, and those have no
    address at all. Every result has to carry what SCOPES it, because a result that does not is
-   the failure mode a 259 KB flat memory demonstrated: every needed fact delivered, still
-   answered wrong, because 201 answers to one question arrived with nothing saying which
-   situation each applied to. */
+   the failure mode a 259 KB flat memory demonstrated: every answer string appeared, but scoped
+   facts averaged only 0.33 of 5, because 201 answer occurrences arrived with nothing saying
+   which situation each applied to. */
 const searched = await tools[0].execute(
   "id", { action: "search", query: "config loading truth" }, undefined, undefined, ctx);
 assert.match(searched.content[0].text, /src\/core\/config/,

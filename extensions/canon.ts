@@ -12,8 +12,9 @@ export interface CanonOptions {
   root?: string;
   /* Surface governing articles as tool calls touch assets. Default: true. */
   surface?: boolean;
-  /* Treat an article as seen only while it is still in the live context window, so one
-     folded or compacted away surfaces again the next time its asset is touched.
+  /* Treat an article with a presence mark as seen only while that mark remains in the
+     live context window, so one folded or compacted away surfaces again on the next
+     touch. Untestably short delivered text has no mark and conservatively stays seen.
      Default: true. Set false for 1.0 behavior, where a surfaced article is never
      surfaced again however long ago it left the window. */
   resurface?: boolean;
@@ -21,18 +22,21 @@ export interface CanonOptions {
      assets, addressed by basename: mounts: ["/data/lake"] serves lake:prices.
      Workspaces that mount the same directory share its knowledge. */
   mounts?: string[];
-  /* How articles that govern no asset are ranked against what the agent is doing, the
-     one category the address spine can never reach. "none" is the default and is the
-     1.0 behavior exactly: nothing is ranked and nothing unaddressed ever surfaces.
-     "lexical" is BM25 over the standard library. Anything needing a model is supplied
-     here as { name, score, index? }, so this package never depends on one. */
+  /* How the retrieval corpus is ranked against what the agent is doing: every
+     off-spine article plus any declared rule, so a rule remains reachable if an asset
+     later appears at its address. Ordinary addressed articles stay out because the
+     spine already reaches them. "none" is the default and is the 1.0 behavior exactly:
+     nothing is ranked or surfaced by relevance. "lexical" is BM25 over the standard
+     library. Anything needing a model is supplied here as { name, score, index? }, so
+     this package never depends on one. */
   retrieval?: RetrievalOption;
   /* How far the best-ranked article must stand out from the rest of what this same
      query touched before it may ride a message. A multiple, not a score: 2 means the
      best must score twice the best article that will not ride, the one just past the
-     per-turn cap. Default 1.4, the operating point a 120-cell study priced: it
-     matched the uncut channel's delivery to within that study's own noise floor at a
-     ninth of the suggestion volume. 1 is no cutoff and is the 1.0 behavior exactly.
+     per-turn cap. Default 1.4, the operating point a 120-cell study priced: its n=15
+     comparison with the uncut channel differed by -0.07 rule facts at p=1.0 while
+     using a ninth of the suggestion volume. That small observed contrast is not a
+     general detection bound. 1 is no cutoff and is the 1.0 behavior exactly.
 
      Relative rather than absolute because an absolute cutoff is not the same quantity
      twice. A lexical score is a fraction of the query's whole idf mass, so it falls as
@@ -114,10 +118,10 @@ export function registerPiCanon(pi: any, options: CanonOptions = {}): void {
   pi.registerTool(buildCanonTool(ready, retriever.name));
 
   /* session_start only resets per-session state. Through 0.2.0 it also delivered an
-     orientation line; a 2x2 with an inert implementation priced that line at more
-     first-pass correctness than the whole tool schema, and the study that removed it
-     found nothing the benefit side could see. The doctrine rides the tool
-     description, which every session carries anyway. */
+     orientation line. A 2x2 with an inert implementation found significant negative
+     main effects for both that line and the tool schema, but did not resolve which
+     component cost more. Study 3 detected no benefit loss from removing the line. The
+     doctrine rides the tool description, which every session carries anyway. */
   pi.on("session_start", (_event: unknown, ctx: any) => {
     runtime = undefined;
     ready(ctx);

@@ -1,6 +1,6 @@
 /* Surfacing: tool calls stage the articles governing what they touch; the staged
-   lines flush as ONE message per turn, once per article per session. One message per
-   turn matters: pi's steering queue drains one message per provider round trip, so
+   lines flush as ONE message per turn, once while a testable presence mark remains.
+   One message per turn matters: pi's steering queue drains one message per provider round trip, so
    a message per tool call would buy each nudge its own extra LLM call.
 
    Nothing here is bounded by a character count. A session budget used to cap the
@@ -44,17 +44,16 @@ const PATHLIKE = /(?:^|[\s"'`=:,([{])(\/?[\w.@-]+(?:\/[\w.@-]+)+)/g;
    JSON escaping, whitespace rewrapping, and quoting differences between however the
    projection is rendered and however we wrote it. A short mark is not distinctive enough
    to test, so it is never expired; failing to expire only costs a re-surface that does
-   not happen, while a false expiry would spam the window. A surfaced line always carries
-   its own address and so is always long enough; only a read of a very small article is
-   not.
+   not happen, while a false expiry would spam the window. The same floor applies to
+   surfaced lines, reads, and writes; an exceptionally terse value in any path stays seen.
 
    A mark has two parts and BOTH must be in the projection.
 
    IDENTITY is the article's own address, which is in the window whichever way the
    article got there: the surfaced line reads "path: capsule" and a read prints the
    address as its title. LIVENESS is the tail of whatever actually entered, the caller
-   passing the whole of it. A surfaced line is its capsule and is held to the capsule;
-   a read is capsule plus body and is held to the body.
+   passing the whole of it. A surfaced line is held to the tail of that exact line; a
+   read is capsule plus body and is held to the body.
 
    Both parts are needed because either alone is wrong in a way that matters. Identity
    alone cannot tell a one-line nudge from the full article, which is the defect that
@@ -143,9 +142,10 @@ export class Surfacer {
 
   /* How far the best must beat the rest of the same query before anything rides. See
      retrieve(). The default is an operating point priced by a 120-cell study rather than
-     picked: at 1.4 a session kept every rule fact the uncut channel delivered at a ninth
-     of the suggestion volume, and a store with nothing relevant never reached it. 1 turns
-     the cutoff off. */
+     picked: at 1.4 the n=15 comparison with the uncut channel differed by -0.07 rule
+     facts at p=1.0 while using a ninth of the suggestion volume, and a store with nothing
+     relevant never reached it. That small observed contrast is not a general detection
+     bound. 1 turns the cutoff off. */
   private standout: number;
 
   constructor(mounts: Mount[], retriever: Retriever = NONE, resurface = true, standout = 1.4) {
@@ -282,7 +282,7 @@ export class Surfacer {
   /* This turn's intent, one entry per tool call. Kept separate from `collect` because
      they answer different questions: collect asks what asset was touched, which the
      spine answers by address, and this asks what the agent is trying to do, which is
-     the only thing an unaddressed article can be ranked against. */
+     what every article in the retrieval corpus is ranked against. */
   noteIntent(toolName: unknown, input: unknown): void {
     if (typeof toolName === "string" && toolName) this.intent.push({ toolName, input });
   }
@@ -321,8 +321,10 @@ export class Surfacer {
      ceiling it means "at least one query term appears in this article at all", which is
      a property of the query rather than a constant someone picked. `standout` is the
      tuned one. A 120-cell study priced it on a corpus with something worth finding in
-     its residue, and 1.4 held every fact the uncut channel delivered at a ninth of the
-     volume; that is the default, and the caller moves it against their own trace.
+     its residue. At 1.4 the n=15 comparison with the uncut channel differed by -0.07
+     rule facts at p=1.0 while using a ninth of the volume; that is the default, and the
+     caller moves it against their own trace. The small contrast is an observation from
+     this study, not a general detection bound.
 
      There used to be an absolute threshold here, on the grounds that a study session was
      handed 28 ranked lines and opened 5, and the scores of the opened and the ignored
@@ -571,10 +573,10 @@ export class Surfacer {
          Both are the same mistake, which is testing presence against something other than
          what was delivered.
 
-         This also retires the workaround the short-capsule case needed. A line always
-         carries its own address, so it always clears MARK_MINIMUM: `Cache.` fingerprints to
-         5 characters and its line to 39. The guard still earns its place on the other call
-         site, where a read of a tiny article really can be too short to test. */
+         This also retires the workaround the short-capsule case needed. The address and
+         date make ordinary lines testable: `Cache.` fingerprints to 5 characters and the
+         `src/core/terse` line to 39. The valid shortest case, address `a` and capsule `x`,
+         reaches only 22 and therefore keeps the conservative short-text behavior. */
       this.remember(path, line);
       this.lastFlush.set(path, entry);
       this.staged.delete(path);

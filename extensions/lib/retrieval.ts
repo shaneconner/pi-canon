@@ -1,11 +1,11 @@
-/* Retrieval: the seam for knowledge the spine cannot address.
+/* Retrieval: the seam for knowledge the ordinary spine cannot address.
 
-   The spine answers every asset-scoped question deterministically and for free, and
-   nothing here changes that. Retrieval runs over the RESIDUE, the articles whose
-   address matches no asset, which is the category 1.0 named and left open ("knowledge
-   filed off the asset path never surfaces"). That scoping is what makes an expensive
-   ranker affordable: the corpus to rank is what has no home, not the whole store, and
-   it stays small precisely because everything with a home is answered without ranking.
+   The spine answers ordinary asset-scoped questions deterministically and for free,
+   and nothing here changes that. Retrieval runs over the RESIDUE: every article whose
+   address matches no asset, plus an article declared `scope: rule` even if an asset
+   later appears at its address. That scoping completes the spine without competing
+   with it: ordinary addressed articles are answered without ranking, while a declared
+   cross-cutting rule cannot disappear because of a filesystem name collision.
 
    Two built-ins ship. `none` is 1.0 exactly and is the experiment's control. `lexical`
    is BM25 with nothing but the standard library. Anything that needs a model is
@@ -25,8 +25,9 @@ export interface Candidate {
   capsule: string;
   body: string;
   updated: string;
-  /* Whether this article SAID it is a cross-cutting rule, rather than being inferred
-     into the corpus by having no asset. See residue below. */
+  /* Whether this article SAID it is a cross-cutting rule. A declared rule qualifies
+     independently of the filesystem; an undeclared article qualifies only off-spine.
+     See residue below. */
   declared: boolean;
 }
 
@@ -290,24 +291,19 @@ export function buildRetriever(option: RetrievalOption | undefined): Retriever {
   );
 }
 
-/* The residue: articles the spine can never surface, because surfacing is triggered by
-   touching an asset and there is nothing here to touch. Everything else is already
-   answered for free and must not be ranked, or retrieval would compete with the address
-   instead of completing it.
+/* The residue completes the spine. Every off-spine article qualifies because an asset
+   touch cannot surface it, and dropping it from retrieval would lose its only automatic
+   path. A declared `scope: rule` also qualifies if an asset later appears at the same
+   address, because the declaration says the article is cross-cutting rather than
+   governed by that coincident asset. Ordinary addressed articles stay out, or retrieval
+   would compete with deterministic address resolution.
 
-   Membership is still decided by having no asset, and that is deliberate: an article
-   unreachable by address has exactly one mechanism left, and dropping it from that
-   mechanism would lose it outright. But the set has always held two populations, and
-   until now nothing could tell them apart (Codex, 2026-08-12). One is the deliberate
-   cross-cutting rule the doctrine asks for, filed at an address naming the rule. The
-   other is an accident: a typo in an address, or an article whose asset was deleted
-   under it. Defining the corpus only by what it is not made those the same thing.
-
-   So an article may DECLARE itself with `scope: rule`, and every candidate carries
-   whether it did. Nothing here filters on it, because a declaration the agent forgot
-   must not cost it the only mechanism that can reach it. What the flag buys is honesty:
-   a declared article is a rule on purpose, an undeclared one is a question, and the two
-   stop being counted as one number. */
+   The off-spine set itself holds two populations. One is the deliberate cross-cutting
+   rule the doctrine asks for, filed at an address naming the rule. The other is an
+   accident: a typo in an address, or an article whose asset was deleted under it. Every
+   candidate therefore carries whether it declared itself. Forgetting the declaration
+   never excludes an off-spine article; the flag makes the distinction visible and keeps
+   a declared rule eligible across a later filesystem collision. */
 export function residue(store: CanonStore, dir: string): Candidate[] {
   const out: Candidate[] = [];
   for (const path of store.list()) {
