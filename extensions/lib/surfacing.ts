@@ -119,10 +119,6 @@ export class Surfacer {
      for an article whose entered text is too short to test, which is never expired. */
   private marks = new Map<string, { id: string; tail: string }>();
   private pendingUpdates = new Set<string>();
-  /* Raw asset paths this session touched, as the tools wrote them. Kept unresolved
-     because the article governing one is often created after the touch; see checkBack(). */
-  private touched = new Set<string>();
-  private checkedBack = new Set<string>();
   private staged = new Map<string, { capsule: string; stamp: string; asset: string; score?: number }>();
   private retriever: Retriever;
   /* The intent the residue was last ranked against, so an unchanged question does not keep
@@ -487,7 +483,6 @@ export class Surfacer {
   /* Stage each newly touched governing article. Nothing is sent or spent here. */
   collect(assets: string[]): void {
     for (const asset of assets) {
-      this.touched.add(asset);
       const mount = this.mountFor(asset);
       const article = mount.store.resolve(asset, mount.dir);
       if (!article) continue;
@@ -594,39 +589,5 @@ export class Surfacer {
       `[pi-canon] Touched but not updated: ${stale.join(", ")}. If this work changed what is true, ` +
       `update the article with pi_canon; if nothing durable changed, leave it.`
     );
-  }
-
-  /* The write-after check the settle reminder cannot carry. The measured failure runs
-     the other way from staleness: a session works on an asset, then records the rule it
-     was following, and ends with code that disobeys the article it just wrote. Sessions
-     that looked back at the asset fixed it every time; sessions that did not never saw
-     it. The write is the one moment both halves are in hand, the rule as recorded and
-     the touched asset it governs, and a settle reminder rides the next turn, which a
-     session that ends at the write never hears.
-
-     Touches are re-resolved here rather than looked up, because the governing article is
-     often CREATED by this very write: at touch time there was nothing to resolve to.
-     Once per article per session; asking twice is what teaches a reader to stop
-     looking. */
-  checkBack(written: string): string | undefined {
-    if (this.checkedBack.has(written)) return undefined;
-    for (const asset of this.touched) {
-      const mount = this.mountFor(asset);
-      const article = mount.store.resolve(asset, mount.dir);
-      if (!article) continue;
-      const key = mount.name ? `${mount.name}:${article.path}` : article.path;
-      if (key !== written) continue;
-      this.checkedBack.add(written);
-      /* The asset is in the record because the path alone cannot distinguish a real
-         touch from a write that somehow triggered itself: an audit of this channel
-         needs to see WHAT the session touched to earn the line (Sol Pro, 2026-08-14). */
-      trace("check-back", { path: written, asset });
-      return (
-        "This session touched the asset this article governs. Check the asset as it " +
-        "stands does what the article says; the session that records a rule is the one " +
-        "most likely to have just broken it."
-      );
-    }
-    return undefined;
   }
 }

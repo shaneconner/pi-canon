@@ -275,8 +275,6 @@ function run(runtime: CanonRuntime, params: Record<string, unknown>): string {
       return [
         `Wrote ${qualify(article.path)}.`,
         ...advise(article, store, prior?.body, { dir: mount.dir, retrieval: runtime.retrieval }),
-        /* Last, because it is the one line asking for an action now. */
-        ...[surfacer.checkBack(qualify(article.path))].filter(Boolean),
       ].join("\n");
     }
     case "journal": {
