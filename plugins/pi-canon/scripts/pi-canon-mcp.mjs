@@ -77,7 +77,7 @@ async function handle(message) {
           tools: { listChanged: false },
           experimental: { [SANDBOX_STATE_META]: {} },
         },
-        serverInfo: { name: `pi-canon-${callerFromEnv()}`, version: "0.2.3" },
+        serverInfo: { name: `pi-canon-${callerFromEnv()}`, version: "0.2.4" },
         instructions: canonToolDescription("none"),
       });
       return;
