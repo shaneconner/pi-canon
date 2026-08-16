@@ -274,4 +274,4 @@ That is development evidence over two arms of one run and it carries no confirma
 - The narrative version: [My agents' wiki was written faster than it was read](https://medium.com/@shane.conner/my-agents-wiki-was-written-faster-than-it-was-read-and-what-was-read-sold-me-back-debt-i-had-a8085319c68b).
 - [pi-fold](https://github.com/shaneconner/pi-fold), a separate optional package serving the working tier. pi-canon ships the two persistent tiers of the same four-tier stack: the journal is the episodic tier, the canon the semantic tier. The two compose, neither requires the other, and neither knows what the other has spent.
 
-MIT. In a clone of this repo, `node tests/verify.mjs` runs the gate suite: every invariant prints by name and the run must end `all N gates green`, 142 of them at this release.
+MIT. In a clone of this repo, `node tests/verify.mjs` runs the gate suite: every invariant prints by name and the run must end `all N gates green`, 149 of them at this release.
