@@ -145,10 +145,11 @@ function postToolUse(input, cwd, file) {
 function sessionStart(input, file) {
   const source = String(input.source ?? "startup");
   mutateState(file, (state) => {
-    /* A thread may compact more than once. Each compact begins a new visibility cycle,
-       so the next touch may surface an article again; resume stays in the same cycle. */
+    /* A thread may compact more than once. Each compact begins a new visibility cycle:
+       prior touches have no effect, while resume stays in the same cycle. */
     if (source === "compact") {
       state.seen = [];
+      state.pending = [];
     } else if (source !== "resume") {
       state.seen = [];
       state.pending = [];

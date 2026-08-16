@@ -1922,6 +1922,8 @@ assert.deepEqual(runHook({
   hook_event_name: "PostToolUse", tool_name: "Read", tool_input: { file_path: "src/config.ts" },
 }), {}, "resume stays in the same compaction cycle");
 assert.deepEqual(runHook({ hook_event_name: "SessionStart", source: "compact" }), {});
+assert.deepEqual(runHook({ hook_event_name: "Stop" }), {},
+  "a pre-compaction touch cannot cause a reminder in the new cycle");
 const firstTouchAfterCompact = runHook({
   hook_event_name: "PostToolUse", tool_name: "Read", tool_input: { file_path: "src/other.ts" },
 });
@@ -1937,7 +1939,8 @@ assert.deepEqual(runHook({
 }), {}, "the article surfaces once in the new compaction cycle");
 const reminder = runHook({ hook_event_name: "Stop" });
 assert.equal(reminder.decision, "block");
-assert.match(reminder.reason, /Touched but not updated: src\/config/);
+assert.match(reminder.reason, /src\/other/);
+assert.match(reminder.reason, /src\/config/);
 assert.deepEqual(runHook({ hook_event_name: "Stop" }), {}, "the stop reminder fires once per batch");
 pass("the shared hook surfaces touched articles once per compaction cycle in either harness");
 
