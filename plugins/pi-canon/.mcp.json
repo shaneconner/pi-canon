@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "pi-canon": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/pi-canon-mcp.mjs"],
+      "env": {
+        "PI_CANON_CALLER": "claude-code"
+      }
+    }
+  }
+}

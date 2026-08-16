@@ -1,0 +1,22 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "pi-canon",
+  "description": "Canonical project memory for Pi, Codex, and Claude Code.",
+  "owner": {
+    "name": "Shane Conner",
+    "email": "shanepatrickconner@gmail.com"
+  },
+  "plugins": [
+    {
+      "name": "pi-canon",
+      "description": "One canonical article per asset, an append-only journal, and capsule surfacing on touch.",
+      "author": {
+        "name": "Shane Conner",
+        "email": "shanepatrickconner@gmail.com"
+      },
+      "category": "productivity",
+      "source": "./plugins/pi-canon",
+      "homepage": "https://github.com/shaneconner/pi-canon"
+    }
+  ]
+}

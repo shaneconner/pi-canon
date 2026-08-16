@@ -1,0 +1,14 @@
+{
+  "name": "pi-canon",
+  "version": "0.2.3",
+  "description": "Canonical project memory with one article per asset, an append-only journal, and capsule surfacing on touch.",
+  "author": {
+    "name": "Shane Conner",
+    "email": "shanepatrickconner@gmail.com"
+  },
+  "homepage": "https://github.com/shaneconner/pi-canon",
+  "repository": "https://github.com/shaneconner/pi-canon",
+  "license": "MIT",
+  "keywords": ["memory", "journal", "canonical", "mcp"],
+  "skills": "./skills/"
+}

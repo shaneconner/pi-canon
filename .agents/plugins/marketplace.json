@@ -1,0 +1,20 @@
+{
+  "name": "pi-canon",
+  "interface": {
+    "displayName": "Pi Canon"
+  },
+  "plugins": [
+    {
+      "name": "pi-canon",
+      "source": {
+        "source": "local",
+        "path": "./plugins/pi-canon"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

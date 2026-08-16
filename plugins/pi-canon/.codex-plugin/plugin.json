@@ -1,0 +1,48 @@
+{
+  "name": "pi-canon",
+  "version": "0.2.3",
+  "description": "Canonical project memory with one article per asset, an append-only journal, and capsule surfacing on touch.",
+  "author": {
+    "name": "Shane Conner",
+    "email": "shanepatrickconner@gmail.com",
+    "url": "https://github.com/shaneconner"
+  },
+  "homepage": "https://github.com/shaneconner/pi-canon",
+  "repository": "https://github.com/shaneconner/pi-canon",
+  "license": "MIT",
+  "keywords": [
+    "memory",
+    "journal",
+    "canonical",
+    "mcp"
+  ],
+  "skills": "./skills/",
+  "mcpServers": {
+    "pi-canon": {
+      "command": "node",
+      "args": [
+        "scripts/pi-canon-mcp.mjs"
+      ],
+      "cwd": ".",
+      "env": {
+        "PI_CANON_CALLER": "codex"
+      }
+    }
+  },
+  "interface": {
+    "displayName": "pi-canon",
+    "shortDescription": "Canonical project memory for coding agents.",
+    "longDescription": "Read and maintain one canonical article per asset, append immutable project events, and surface governing capsules when tools touch files.",
+    "developerName": "Shane Conner",
+    "category": "Productivity",
+    "capabilities": [
+      "MCP",
+      "Hooks"
+    ],
+    "websiteURL": "https://github.com/shaneconner/pi-canon",
+    "defaultPrompt": [
+      "Map this project's canonical memory.",
+      "Read the canon governing the files in this task."
+    ]
+  }
+}

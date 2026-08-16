@@ -3,10 +3,10 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { createJiti } from "jiti";
 
 const projectRoot = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -1785,6 +1785,134 @@ const cappedSearch = await jtools[0].execute(
 assert.match(cappedSearch.content[0].text, /more matched; narrow the query/,
   "the cap announces how many it dropped");
 pass("search says what it truncated instead of implying it returned everything");
+
+/* --- Codex and Claude Code plugin ------------------------------------------------
+   Marketplace installers copy one plugin directory, so its core mirror must remain
+   byte-identical to the implementation Pi loads. */
+const pluginRoot = join(projectRoot, "plugins/pi-canon");
+for (const file of ["lint.ts", "retrieval.ts", "store.ts", "surfacing.ts", "tool.ts"]) {
+  assert.equal(
+    readFileSync(join(pluginRoot, "core", file), "utf8"),
+    readFileSync(join(projectRoot, "extensions/lib", file), "utf8"),
+    `${file} drifted; run node scripts/sync-plugin-core.mjs`,
+  );
+}
+pass("the marketplace plugin carries an exact generated mirror of the Pi core");
+
+const codexPlugin = JSON.parse(readFileSync(join(pluginRoot, ".codex-plugin/plugin.json"), "utf8"));
+const claudePlugin = JSON.parse(readFileSync(join(pluginRoot, ".claude-plugin/plugin.json"), "utf8"));
+const packageManifest = JSON.parse(readFileSync(join(projectRoot, "package.json"), "utf8"));
+assert.equal(codexPlugin.name, "pi-canon");
+assert.equal(claudePlugin.name, "pi-canon");
+assert.equal(codexPlugin.version, packageManifest.version);
+assert.equal(claudePlugin.version, packageManifest.version);
+assert.equal(codexPlugin.mcpServers["pi-canon"].args[0], "scripts/pi-canon-mcp.mjs");
+assert.equal(codexPlugin.mcpServers["pi-canon"].cwd, ".");
+assert.equal(codexPlugin.mcpServers["pi-canon"].env.PI_CANON_CALLER, "codex");
+assert.equal("mcpServers" in claudePlugin, false, "Claude auto-discovers the standard MCP file once");
+const claudeMcp = JSON.parse(readFileSync(join(pluginRoot, ".mcp.json"), "utf8"));
+assert.equal(claudeMcp.mcpServers["pi-canon"].args[0],
+  "${CLAUDE_PLUGIN_ROOT}/scripts/pi-canon-mcp.mjs");
+assert.equal(claudeMcp.mcpServers["pi-canon"].env.PI_CANON_CALLER, "claude-code");
+assert.equal("hooks" in claudePlugin, false, "the standard hook file is auto-discovered exactly once");
+assert.ok(existsSync(join(pluginRoot, "hooks/hooks.json")));
+assert.ok(existsSync(join(pluginRoot, "skills/pi-canon/SKILL.md")));
+pass("Codex and Claude Code share one plugin surface with explicit caller provenance");
+
+const codexMarketplace = JSON.parse(
+  readFileSync(join(projectRoot, ".agents/plugins/marketplace.json"), "utf8"),
+);
+const claudeMarketplace = JSON.parse(
+  readFileSync(join(projectRoot, ".claude-plugin/marketplace.json"), "utf8"),
+);
+assert.equal(codexMarketplace.plugins[0].source.path, "./plugins/pi-canon");
+assert.equal(claudeMarketplace.plugins[0].source, "./plugins/pi-canon");
+pass("the same repository is a valid marketplace root for both harnesses");
+
+const mcpDir = mkdtempSync(join(tmpdir(), "pi-canon-mcp-"));
+const mcpMeta = {
+  threadId: "gate-session",
+  "codex/sandbox-state-meta": { sandboxCwd: pathToFileURL(mcpDir).href },
+};
+const mcpMessages = [
+  { jsonrpc: "2.0", id: 1, method: "initialize", params: {
+    protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "gate", version: "1" },
+  } },
+  { jsonrpc: "2.0", method: "notifications/initialized" },
+  { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
+  { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "pi_canon", _meta: mcpMeta, arguments: {
+    action: "write", path: "src/config.ts", capsule: "Env wins.", body: "Defaults, then environment.",
+  } } },
+  { jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "pi_canon", _meta: mcpMeta, arguments: {
+    action: "journal", subject: ["src/config"], slug: "mcp-gate", body: "Codex recorded limit 17.",
+  } } },
+];
+const mcp = spawnSync(process.execPath, [join(pluginRoot, "scripts/pi-canon-mcp.mjs")], {
+  cwd: pluginRoot,
+  encoding: "utf8",
+  input: `${mcpMessages.map(JSON.stringify).join("\n")}\n`,
+  env: { ...process.env, PI_CANON_CALLER: "codex" },
+});
+assert.equal(mcp.status, 0, mcp.stderr);
+const replies = mcp.stdout.trim().split("\n").map(JSON.parse);
+assert.equal(replies.find((r) => r.id === 1).result.serverInfo.name, "pi-canon-codex");
+assert.deepEqual(replies.find((r) => r.id === 1).result.capabilities.experimental,
+  { "codex/sandbox-state-meta": {} });
+assert.equal(replies.find((r) => r.id === 2).result.tools[0].name, "pi_canon");
+assert.match(replies.find((r) => r.id === 3).result.content[0].text, /Wrote src\/config/);
+assert.match(replies.find((r) => r.id === 4).result.content[0].text, /Logged .*mcp-gate/);
+const mcpJournal = readdirSync(join(mcpDir, ".canon/journal"))[0];
+const mcpEntry = readFileSync(join(mcpDir, ".canon/journal", mcpJournal), "utf8");
+assert.match(mcpEntry, /^harness: codex$/m);
+assert.match(mcpEntry, /^session: gate-session$/m);
+const claudeMcpMessages = [
+  mcpMessages[0],
+  { jsonrpc: "2.0", method: "notifications/initialized" },
+  { jsonrpc: "2.0", id: 5, method: "tools/call", params: { name: "pi_canon", arguments: {
+    action: "read", path: "src/config",
+  } } },
+];
+const claudeMcpRun = spawnSync(process.execPath, [join(pluginRoot, "scripts/pi-canon-mcp.mjs")], {
+  cwd: mcpDir,
+  encoding: "utf8",
+  input: `${claudeMcpMessages.map(JSON.stringify).join("\n")}\n`,
+  env: { ...process.env, PI_CANON_CALLER: "claude-code" },
+});
+assert.equal(claudeMcpRun.status, 0, claudeMcpRun.stderr);
+const claudeReplies = claudeMcpRun.stdout.trim().split("\n").map(JSON.parse);
+assert.equal(claudeReplies.find((r) => r.id === 1).result.serverInfo.name, "pi-canon-claude-code");
+assert.match(claudeReplies.find((r) => r.id === 5).result.content[0].text, /Defaults, then environment/);
+pass("the MCP adapter resolves both Codex turn metadata and Claude's project cwd");
+
+const hookDir = mkdtempSync(join(tmpdir(), "pi-canon-hook-"));
+const hookData = mkdtempSync(join(tmpdir(), "pi-canon-hook-data-"));
+mkdirSync(join(hookDir, "src"), { recursive: true });
+writeFileSync(join(hookDir, "src/config.ts"), "export const value = 1;\n");
+const hookStore = new CanonStore(join(hookDir, ".canon"));
+hookStore.write("src/config", { capsule: "Env wins.", body: "Defaults, then environment." });
+const hookScript = join(pluginRoot, "scripts/pi-canon-hook.mjs");
+const runHook = (payload) => {
+  const hooked = spawnSync(process.execPath, [hookScript], {
+    encoding: "utf8",
+    input: `${JSON.stringify({ session_id: "hook-gate", cwd: hookDir, ...payload })}\n`,
+    env: { ...process.env, PLUGIN_DATA: hookData, PI_CANON_CALLER: "codex" },
+  });
+  assert.equal(hooked.status, 0, hooked.stderr);
+  return JSON.parse(hooked.stdout);
+};
+assert.deepEqual(runHook({ hook_event_name: "SessionStart", source: "startup" }), {});
+const surfaced = runHook({
+  hook_event_name: "PostToolUse", tool_name: "Read", tool_input: { file_path: "src/config.ts" },
+});
+assert.match(surfaced.hookSpecificOutput.additionalContext, /src\/config.*Env wins/);
+assert.deepEqual(runHook({
+  hook_event_name: "PostToolUse", tool_name: "Read", tool_input: { file_path: "src/config.ts" },
+}), {}, "the second touch stays quiet in the same session");
+const reminder = runHook({ hook_event_name: "Stop" });
+assert.equal(reminder.decision, "block");
+assert.match(reminder.reason, /Touched but not updated: src\/config/);
+assert.deepEqual(runHook({ hook_event_name: "Stop" }), {}, "the stop reminder fires once per batch");
+pass("the shared hook surfaces once and gives one write-after reminder in either harness");
 
 
 console.log(`\nall ${gates} gates green`);

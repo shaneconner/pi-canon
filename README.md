@@ -8,11 +8,37 @@ Canonical project memory for the [Pi coding agent](https://pi.dev). Every asset 
 
 ## Install
 
+### Pi
+
 ```
 pi install npm:pi-canon
 ```
 
 Or clone this repo into `~/.pi/agent/extensions/`. Node 22.18 or later, Pi 0.83 or later on the 0.x line. Nothing to configure: the store is created on first write at `<project>/.canon`. The package imports `node:fs` and `node:path` and nothing else, makes no network calls, runs no git, and loads under plain node with no build step.
+
+### Codex
+
+The repository is a Codex marketplace. Add it once, then install the plugin at user scope:
+
+```sh
+codex plugin marketplace add shaneconner/pi-canon
+codex plugin add pi-canon@pi-canon
+```
+
+For a local checkout under development, replace `shaneconner/pi-canon` with its absolute path. Start a new Codex thread after installing or updating it.
+
+### Claude Code
+
+The same repository is also a Claude Code marketplace:
+
+```sh
+claude plugin marketplace add shaneconner/pi-canon --scope user
+claude plugin install pi-canon@pi-canon --scope user
+```
+
+Again, an absolute checkout path works for local development. Start a new Claude Code session after installing or updating it.
+
+Both plugins launch the same dependency-free MCP server and expose the same `pi_canon` actions as Pi. Shared hooks surface a governing capsule after a file touch and give one write-after reminder before the agent stops. They are inert in projects without `.canon/articles`, and they never create a store merely because a session opened. Review and approve the plugin hooks when the client asks. Journal entries written through the MCP server carry explicit `harness` provenance and a session identifier when the client exposes one.
 
 ## The first article
 
