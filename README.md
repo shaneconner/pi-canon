@@ -240,6 +240,7 @@ That is development evidence over two arms of one run and it carries no confirma
 
 ## More
 
+- The 0.2 paper, with its six-study per-cell artifact trail: [doi:10.5281/zenodo.21960350](https://doi.org/10.5281/zenodo.21960350).
 - The first paper, with its end-to-end per-cell artifact trail: [doi:10.5281/zenodo.21890647](https://doi.org/10.5281/zenodo.21890647).
 - The benchmark, drivers, frozen protocol, and the verifier that recomputes the paper's quantitative claims from the artifacts: [canon-bench](https://github.com/shaneconner/canon-bench).
 - Interactive versions of every figure and the full measurement story: [shaneconner.com/projects/pi-canon](https://shaneconner.com/projects/pi-canon/).
