@@ -1821,10 +1821,16 @@ const claudeMcp = JSON.parse(readFileSync(join(pluginRoot, ".mcp.json"), "utf8")
 assert.equal(claudeMcp.mcpServers["pi-canon"].args[0],
   "${CLAUDE_PLUGIN_ROOT}/scripts/pi-canon-mcp.mjs");
 assert.equal(claudeMcp.mcpServers["pi-canon"].env.PI_CANON_CALLER, "claude-code");
-assert.equal("hooks" in claudePlugin, false, "the standard hook file is auto-discovered exactly once");
-assert.ok(existsSync(join(pluginRoot, "hooks/hooks.json")));
+assert.equal("hooks" in codexPlugin, false, "Codex auto-discovers its standard hook file once");
+assert.equal(claudePlugin.hooks, "./hooks/claude.json");
+const codexHooks = JSON.parse(readFileSync(join(pluginRoot, "hooks/hooks.json"), "utf8"));
+const claudeHooks = JSON.parse(readFileSync(join(pluginRoot, "hooks/claude.json"), "utf8"));
+assert.ok(codexHooks.hooks.PostToolUse);
+assert.equal("PostToolBatch" in codexHooks.hooks, false);
+assert.ok(claudeHooks.hooks.PostToolBatch);
+assert.equal("PostToolUse" in claudeHooks.hooks, false);
 assert.ok(existsSync(join(pluginRoot, "skills/pi-canon/SKILL.md")));
-pass("Codex and Claude Code share one plugin surface with explicit caller provenance");
+pass("one plugin gives Codex per-tool hooks and Claude Code a per-batch hook");
 
 const codexMarketplace = JSON.parse(
   readFileSync(join(projectRoot, ".agents/plugins/marketplace.json"), "utf8"),
@@ -1900,11 +1906,11 @@ const hookStore = new CanonStore(join(hookDir, ".canon"));
 hookStore.write("src/config", { capsule: "Env wins.", body: "Defaults, then environment." });
 hookStore.write("src/other", { capsule: "Other rule.", body: "Only other.ts uses this." });
 const hookScript = join(pluginRoot, "scripts/pi-canon-hook.mjs");
-const runHook = (payload) => {
+const runHook = (payload, caller = "codex", session = "hook-gate") => {
   const hooked = spawnSync(process.execPath, [hookScript], {
     encoding: "utf8",
-    input: `${JSON.stringify({ session_id: "hook-gate", cwd: hookDir, ...payload })}\n`,
-    env: { ...process.env, PLUGIN_DATA: hookData, PI_CANON_CALLER: "codex" },
+    input: `${JSON.stringify({ session_id: session, cwd: hookDir, ...payload })}\n`,
+    env: { ...process.env, PLUGIN_DATA: hookData, PI_CANON_CALLER: caller },
   });
   assert.equal(hooked.status, 0, hooked.stderr);
   return JSON.parse(hooked.stdout);
@@ -1942,7 +1948,46 @@ assert.equal(reminder.decision, "block");
 assert.match(reminder.reason, /src\/other/);
 assert.match(reminder.reason, /src\/config/);
 assert.deepEqual(runHook({ hook_event_name: "Stop" }), {}, "the stop reminder fires once per batch");
-pass("the shared hook surfaces touched articles once per compaction cycle in either harness");
+pass("the Codex hook surfaces touched articles once per compaction cycle");
+
+const runClaudeHook = (payload) => runHook(payload, "claude-code", "hook-gate-claude");
+assert.deepEqual(runClaudeHook({ hook_event_name: "SessionStart", source: "startup" }), {});
+const batch = runClaudeHook({
+  hook_event_name: "PostToolBatch",
+  tool_calls: [
+    { tool_name: "Read", tool_input: { file_path: "src/config.ts" } },
+    { tool_name: "Read", tool_input: { file_path: "src/other.ts" } },
+    { tool_name: "Grep", tool_input: { path: "src/config.ts" } },
+  ],
+});
+assert.equal(batch.hookSpecificOutput.hookEventName, "PostToolBatch");
+assert.match(batch.hookSpecificOutput.additionalContext, /what this tool batch touched/);
+assert.equal(batch.hookSpecificOutput.additionalContext.match(/src\/config/g)?.length, 1,
+  "the batch deduplicates one article reached by two tools");
+assert.equal(batch.hookSpecificOutput.additionalContext.match(/src\/other/g)?.length, 1);
+assert.deepEqual(runClaudeHook({
+  hook_event_name: "PostToolBatch",
+  tool_calls: [{ tool_name: "Read", tool_input: { file_path: "src/config.ts" } }],
+}), {}, "a later batch stays quiet while the article remains seen in this cycle");
+assert.deepEqual(runClaudeHook({ hook_event_name: "SessionStart", source: "compact" }), {});
+const afterClaudeCompact = runClaudeHook({
+  hook_event_name: "PostToolBatch",
+  tool_calls: [{ tool_name: "Read", tool_input: { file_path: "src/other.ts" } }],
+});
+assert.match(afterClaudeCompact.hookSpecificOutput.additionalContext, /src\/other.*Other rule/);
+assert.doesNotMatch(afterClaudeCompact.hookSpecificOutput.additionalContext, /src\/config/,
+  "the batch hook does not replay an asset touched before compaction");
+
+const runClaudeReadBatch = (payload) => runHook(payload, "claude-code", "hook-gate-claude-read");
+assert.deepEqual(runClaudeReadBatch({ hook_event_name: "SessionStart", source: "startup" }), {});
+assert.deepEqual(runClaudeReadBatch({
+  hook_event_name: "PostToolBatch",
+  tool_calls: [
+    { tool_name: "Read", tool_input: { file_path: "src/config.ts" } },
+    { tool_name: "mcp__pi-canon__pi_canon", tool_input: { action: "read", path: "src/config" } },
+  ],
+}), {}, "a full article read in the same batch makes its capsule redundant");
+pass("the Claude hook emits one deduplicated current-cycle packet per tool batch");
 
 
 console.log(`\nall ${gates} gates green`);

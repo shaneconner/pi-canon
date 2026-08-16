@@ -101,42 +101,51 @@ function ownTool(name) {
   return value === "pi_canon" || (value.includes("pi-canon") && value.endsWith("pi_canon"));
 }
 
-function postToolUse(input, cwd, file) {
+function toolCalls(input, event) {
+  if (event === "PostToolBatch") {
+    return Array.isArray(input.tool_calls) ? input.tool_calls : [];
+  }
+  return [{ tool_name: input.tool_name, tool_input: input.tool_input }];
+}
+
+function afterTools(input, event, cwd, file) {
   const store = new CanonStore(join(cwd, ".canon"));
-  const toolName = input.tool_name;
-  const toolInput = input.tool_input ?? {};
+  const calls = toolCalls(input, event);
   return mutateState(file, (state) => {
     const seen = new Set(state.seen);
     const pending = new Set(state.pending);
+    const surfacer = new Surfacer([{ name: "", dir: cwd, store }]);
+    const staged = [];
 
-    if (ownTool(toolName)) {
+    /* A full article read anywhere in a parallel batch makes its capsule redundant.
+       Process pi_canon calls first, then collect the assets touched by every other call. */
+    for (const call of calls.filter((candidate) => ownTool(candidate?.tool_name))) {
+      const toolInput = call?.tool_input ?? {};
       const article = articleFor(store, cwd, toolInput.path);
       if (article && (toolInput.action === "read" || toolInput.action === "write")) seen.add(article.path);
       if (article && toolInput.action === "write") pending.delete(article.path);
-      state.seen = [...seen];
-      state.pending = [...pending];
-      return undefined;
     }
 
-    const surfacer = new Surfacer([{ name: "", dir: cwd, store }]);
-    const staged = [];
-    for (const asset of surfacer.pathsIn(toolInput)) {
-      const article = store.resolve(asset, cwd);
-      if (!article) continue;
-      pending.add(article.path);
-      if (seen.has(article.path)) continue;
-      seen.add(article.path);
-      const stamp = article.updated ? ` (updated ${article.updated})` : "";
-      staged.push(article.capsule
-        ? `${article.path}${stamp}: ${article.capsule}`
-        : `${article.path}${stamp}: article exists. Read it before relying on ${asset}.`);
+    for (const call of calls.filter((candidate) => !ownTool(candidate?.tool_name))) {
+      for (const asset of surfacer.pathsIn(call?.tool_input ?? {})) {
+        const article = store.resolve(asset, cwd);
+        if (!article) continue;
+        pending.add(article.path);
+        if (seen.has(article.path)) continue;
+        seen.add(article.path);
+        const stamp = article.updated ? ` (updated ${article.updated})` : "";
+        staged.push(article.capsule
+          ? `${article.path}${stamp}: ${article.capsule}`
+          : `${article.path}${stamp}: article exists. Read it before relying on ${asset}.`);
+      }
     }
     state.seen = [...seen];
     state.pending = [...pending];
     if (!staged.length) return undefined;
     const plural = staged.length > 1 ? "s" : "";
+    const source = event === "PostToolBatch" ? "this tool batch" : "this tool";
     return (
-      `[pi-canon] Governing article${plural} for what this tool touched. Read the full article with `
+      `[pi-canon] Governing article${plural} for what ${source} touched. Read the full article with `
       + `pi_canon before depending on details; update it after real changes.\n${staged.join("\n")}`
     );
   });
@@ -180,10 +189,10 @@ try {
     if (event === "SessionStart") {
       sessionStart(input, file);
       process.stdout.write("{}\n");
-    } else if (event === "PostToolUse") {
-      const context = postToolUse(input, cwd, file);
+    } else if (event === "PostToolUse" || event === "PostToolBatch") {
+      const context = afterTools(input, event, cwd, file);
       process.stdout.write(`${JSON.stringify(context ? {
-        hookSpecificOutput: { hookEventName: "PostToolUse", additionalContext: context },
+        hookSpecificOutput: { hookEventName: event, additionalContext: context },
       } : {})}\n`);
     } else if (event === "Stop" && !input.stop_hook_active) {
       const reason = existsSync(file) ? stop(file) : undefined;

@@ -1,5 +1,5 @@
 {
-  "description": "In Codex, surface governing pi-canon capsules after each tool result and remind once about durable updates before stop.",
+  "description": "In Claude Code, surface one pi-canon capsule packet after each tool batch and remind once about durable updates before stop.",
   "hooks": {
     "SessionStart": [
       {
@@ -12,7 +12,7 @@
         ]
       }
     ],
-    "PostToolUse": [
+    "PostToolBatch": [
       {
         "hooks": [
           {

@@ -10,5 +10,6 @@
   "repository": "https://github.com/shaneconner/pi-canon",
   "license": "MIT",
   "keywords": ["memory", "journal", "canonical", "mcp"],
-  "skills": "./skills/"
+  "skills": "./skills/",
+  "hooks": "./hooks/claude.json"
 }
