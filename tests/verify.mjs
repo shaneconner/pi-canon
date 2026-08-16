@@ -200,6 +200,13 @@ const paths = surf.pathsIn({ file_path: join(projDir, "src/core/config.ts"), not
 assert.deepEqual(paths, [join(projDir, "src/core/config.ts")]);
 pass("pathsIn keeps only paths that exist on disk");
 
+const surfNoChildren = new Surfacer([{ name: "", dir: projDir, store }]);
+surfNoChildren.collect(paths);
+const onlyGoverning = surfNoChildren.flush();
+assert.match(onlyGoverning, /src\/core\/config \(updated .*\): Loads layered config/);
+assert.doesNotMatch(onlyGoverning, /src\/core\/config\/tiny/);
+pass("a touch surfaces one governing article and never descends into child articles");
+
 const multiline = surf.pathsIn({ command: "grep foo src/core/config.ts\nsrc/core/other.ts\n\tsrc/core/config.ts" });
 assert.ok(multiline.includes("src/core/other.ts"));
 pass("paths after JSON-escaped newlines and tabs still match");
@@ -1888,8 +1895,10 @@ const hookDir = mkdtempSync(join(tmpdir(), "pi-canon-hook-"));
 const hookData = mkdtempSync(join(tmpdir(), "pi-canon-hook-data-"));
 mkdirSync(join(hookDir, "src"), { recursive: true });
 writeFileSync(join(hookDir, "src/config.ts"), "export const value = 1;\n");
+writeFileSync(join(hookDir, "src/other.ts"), "export const other = 2;\n");
 const hookStore = new CanonStore(join(hookDir, ".canon"));
 hookStore.write("src/config", { capsule: "Env wins.", body: "Defaults, then environment." });
+hookStore.write("src/other", { capsule: "Other rule.", body: "Only other.ts uses this." });
 const hookScript = join(pluginRoot, "scripts/pi-canon-hook.mjs");
 const runHook = (payload) => {
   const hooked = spawnSync(process.execPath, [hookScript], {
@@ -1908,11 +1917,29 @@ assert.match(surfaced.hookSpecificOutput.additionalContext, /src\/config.*Env wi
 assert.deepEqual(runHook({
   hook_event_name: "PostToolUse", tool_name: "Read", tool_input: { file_path: "src/config.ts" },
 }), {}, "the second touch stays quiet in the same session");
+assert.deepEqual(runHook({ hook_event_name: "SessionStart", source: "resume" }), {});
+assert.deepEqual(runHook({
+  hook_event_name: "PostToolUse", tool_name: "Read", tool_input: { file_path: "src/config.ts" },
+}), {}, "resume stays in the same compaction cycle");
+assert.deepEqual(runHook({ hook_event_name: "SessionStart", source: "compact" }), {});
+const firstTouchAfterCompact = runHook({
+  hook_event_name: "PostToolUse", tool_name: "Read", tool_input: { file_path: "src/other.ts" },
+});
+assert.match(firstTouchAfterCompact.hookSpecificOutput.additionalContext, /src\/other.*Other rule/);
+assert.doesNotMatch(firstTouchAfterCompact.hookSpecificOutput.additionalContext, /src\/config/,
+  "compaction does not replay an article whose asset has not been touched in the new cycle");
+const resurfacedAfterCompact = runHook({
+  hook_event_name: "PostToolUse", tool_name: "Read", tool_input: { file_path: "src/config.ts" },
+});
+assert.match(resurfacedAfterCompact.hookSpecificOutput.additionalContext, /src\/config.*Env wins/);
+assert.deepEqual(runHook({
+  hook_event_name: "PostToolUse", tool_name: "Read", tool_input: { file_path: "src/config.ts" },
+}), {}, "the article surfaces once in the new compaction cycle");
 const reminder = runHook({ hook_event_name: "Stop" });
 assert.equal(reminder.decision, "block");
 assert.match(reminder.reason, /Touched but not updated: src\/config/);
 assert.deepEqual(runHook({ hook_event_name: "Stop" }), {}, "the stop reminder fires once per batch");
-pass("the shared hook surfaces once and gives one write-after reminder in either harness");
+pass("the shared hook surfaces touched articles once per compaction cycle in either harness");
 
 
 console.log(`\nall ${gates} gates green`);
