@@ -2,6 +2,8 @@
 
 Canonical project memory for the [Pi coding agent](https://pi.dev). Every asset has at most one governing article, at an address computed from the asset's own path: `src/core/config.ts` is governed by `articles/src/core/config.md`. Beneath the articles sits an append-only journal, one file per event. When a tool call touches a governed asset, that article's one dense line arrives in the session unasked, so the agent does not have to know there was something to look up. Detecting the path in a tool call is best effort; resolving it to an article is not.
 
+**One setup measured, others welcome.** pi-canon was developed and tested under one configuration: Codex, with GPT 5.6 as the worker model, on an OpenAI subscription. Every number in this README was measured there. Other models, other providers, and API-metered access are untested. If you run it under a different setup, feedback is welcome and so are pull requests.
+
 ![The store drawn as a graph, articles tethered to the assets they govern](https://raw.githubusercontent.com/shaneconner/pi-canon/main/docs/assets/pi-canon-constellation.gif)
 
 *An illustrative store: 33 articles, 20 journal entries, 40 files. Discs are articles, rings are journal entries hanging under the article each was distilled into, and a square tethered beneath a disc is the asset that article was named for. Six of the articles match no asset and hang untethered, because free knowledge is not a special case here. Selecting a node opens what it holds, what it points at, and what points at it.*
@@ -39,6 +41,17 @@ claude plugin install pi-canon@pi-canon --scope user
 Again, an absolute checkout path works for local development. Start a new Claude Code session after installing or updating it.
 
 Both plugins launch the same dependency-free MCP server and expose the same `pi_canon` actions as Pi. Codex surfaces after each tool result. Claude Code deduplicates one capsule packet across each parallel tool batch, immediately before the next model request, which avoids repeated message framing without delaying the agent's next decision. Both give one write-after reminder before the agent stops. An article surfaces at most once per compaction cycle: a compact starts a new cycle, while resuming the same uncompacted session does not. One session may contain several compaction cycles. Compaction discards prior touch state and replays nothing. After it, only a fresh tool-input path can surface that asset's exact or nearest-ancestor article; children and unrelated articles do not ride along. The hooks are inert in projects without `.canon/articles`, and they never create a store merely because a session opened. Review and approve the plugin hooks when the client asks. Journal entries written through the MCP server carry explicit `harness` provenance and a session identifier when the client exposes one.
+
+## Defaults
+
+What you have after installing, with nothing configured:
+
+- **Addressing and surfacing on touch are on.** Touch a governed asset with a tool call and its article's capsule arrives unasked. This is the pairing the measurements kept: addressing is what survives store growth, and surfacing is what makes addressing discoverable. In the sizing study, every session that asked for the decisive address scored and 0 of 30 that did not ask scored, so recall that waits to be asked stops working exactly when the store outgrows what a session already knows.
+- **The journal is append-only and quiet.** It is never read whole and never surfaced unsolicited; search is the only channel that reaches it. Treating history as memory was priced at a median 340,119 tokens per session against 21,309 for a distilled document, for no more correctness.
+- **Recommendation is off.** `retrieval: "none"` is the default because the channel pays only where the store holds knowledge the address spine cannot reach, declared rules governing no asset, and the package cannot know which kind of store it faces. It also needs a retriever this package deliberately does not choose for you. Turn it on with `retrieval: "lexical"`, and the standout gate arrives at its measured default of 1.4 with the drained-store guard.
+- **Nothing greets the session.** The orientation line and the session-end check-back were removed by their own measurements: presenting the memory surface alone, with nothing behind it, took first-pass correctness from 25 of 32 to 8 of 32, and the check-back's reminder was delivered and never acted on.
+
+The whole option surface is six keys: `root`, `surface`, `resurface`, `retrieval`, `standout`, `mounts`. Each is documented under [Options](#options) with the measurement that set its default. Everything else is a constant on purpose.
 
 ## The first article
 
@@ -270,8 +283,9 @@ That is development evidence over two arms of one run and it carries no confirma
 - The 0.2 paper, with its six-study per-cell artifact trail: [doi:10.5281/zenodo.21960350](https://doi.org/10.5281/zenodo.21960350).
 - The first paper, with its end-to-end per-cell artifact trail: [doi:10.5281/zenodo.21890647](https://doi.org/10.5281/zenodo.21890647).
 - The benchmark, drivers, frozen protocol, and the verifier that recomputes the paper's quantitative claims from the artifacts: [canon-bench](https://github.com/shaneconner/canon-bench).
-- Interactive versions of every figure and the full measurement story: [shaneconner.com/projects/pi-canon](https://shaneconner.com/projects/pi-canon/).
-- The narrative version: [My agents' wiki was written faster than it was read](https://medium.com/@shane.conner/my-agents-wiki-was-written-faster-than-it-was-read-and-what-was-read-sold-me-back-debt-i-had-a8085319c68b).
+- Interactive versions of the figures and the full measurement story, Part 1 and Part 2: [shaneconner.com/projects/pi-canon](https://shaneconner.com/projects/pi-canon/).
+- The first campaign's narrative version: [My agents' wiki was written faster than it was read](https://medium.com/@shane.conner/my-agents-wiki-was-written-faster-than-it-was-read-and-what-was-read-sold-me-back-debt-i-had-a8085319c68b).
+- The second campaign's, on pricing recall: [Pricing recall in long-term memory for AI agents](https://medium.com/@shane.conner/pricing-recall-in-long-term-memory-for-ai-agents-7d73f6418c17).
 - [pi-fold](https://github.com/shaneconner/pi-fold), a separate optional package serving the working tier. pi-canon ships the two persistent tiers of the same four-tier stack: the journal is the episodic tier, the canon the semantic tier. The two compose, neither requires the other, and neither knows what the other has spent.
 
 MIT. In a clone of this repo, `node tests/verify.mjs` runs the gate suite: every invariant prints by name and the run must end `all N gates green`, 149 of them at this release.
