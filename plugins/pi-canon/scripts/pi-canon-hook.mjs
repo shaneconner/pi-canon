@@ -15,7 +15,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { CanonStore } from "../core/store.ts";
-import { Surfacer } from "../core/surfacing.ts";
+import { changesAssets, Surfacer } from "../core/surfacing.ts";
 import { articleFor, callerFromEnv, hasCanon } from "./runtime.mjs";
 
 const pause = new Int32Array(new SharedArrayBuffer(4));
@@ -47,17 +47,43 @@ function statePath(input, cwd) {
 }
 
 function emptyState() {
-  return { version: 1, seen: [], pending: [] };
+  return { version: 2, seen: [], pending: [] };
 }
 
 function readState(file) {
   try {
     const state = JSON.parse(readFileSync(file, "utf8"));
-    if (state?.version === 1 && Array.isArray(state.seen) && Array.isArray(state.pending)) return state;
+    if (state?.version === 2 && Array.isArray(state.seen) && Array.isArray(state.pending)
+      && state.pending.every((entry) => entry && typeof entry.path === "string"
+        && (entry.fingerprint === null || typeof entry.fingerprint === "string"))) {
+      return state;
+    }
+    /* Version 1 carried only paths. Preserve a pending obligation conservatively when an
+       already-open session first reaches the new hook; no baseline exists to prove that a
+       hidden write satisfied it. */
+    if (state?.version === 1 && Array.isArray(state.seen) && Array.isArray(state.pending)
+      && state.pending.every((path) => typeof path === "string")) {
+      return {
+        version: 2,
+        seen: state.seen,
+        pending: state.pending.map((path) => ({ path, fingerprint: null })),
+      };
+    }
   } catch {
     /* A missing or partial state file starts clean. */
   }
   return emptyState();
+}
+
+function articleFingerprint(article) {
+  return createHash("sha256").update(JSON.stringify({
+    path: article.path,
+    capsule: article.capsule,
+    updated: article.updated,
+    scope: article.scope,
+    extra: article.extra,
+    body: article.body,
+  })).digest("hex");
 }
 
 function lock(file) {
@@ -113,7 +139,7 @@ function afterTools(input, event, cwd, file) {
   const calls = toolCalls(input, event);
   return mutateState(file, (state) => {
     const seen = new Set(state.seen);
-    const pending = new Set(state.pending);
+    const pending = new Map(state.pending.map((entry) => [entry.path, entry.fingerprint]));
     const surfacer = new Surfacer([{ name: "", dir: cwd, store }]);
     const staged = [];
 
@@ -127,10 +153,15 @@ function afterTools(input, event, cwd, file) {
     }
 
     for (const call of calls.filter((candidate) => !ownTool(candidate?.tool_name))) {
+      const changed = changesAssets(call?.tool_name, call?.tool_input);
       for (const asset of surfacer.pathsIn(call?.tool_input ?? {})) {
         const article = store.resolve(asset, cwd);
         if (!article) continue;
-        pending.add(article.path);
+        /* Always take the article's current fingerprint for a new modifying call. If an
+           unobservable nested pi_canon write satisfied an earlier obligation, a later edit
+           must start a new obligation from the updated article rather than inheriting the
+           old baseline. */
+        if (changed) pending.set(article.path, articleFingerprint(article));
         if (seen.has(article.path)) continue;
         seen.add(article.path);
         const stamp = article.updated ? ` (updated ${article.updated})` : "";
@@ -140,7 +171,7 @@ function afterTools(input, event, cwd, file) {
       }
     }
     state.seen = [...seen];
-    state.pending = [...pending];
+    state.pending = [...pending].map(([path, fingerprint]) => ({ path, fingerprint }));
     if (!staged.length) return undefined;
     const plural = staged.length > 1 ? "s" : "";
     const source = event === "PostToolBatch" ? "this tool batch" : "this tool";
@@ -166,13 +197,19 @@ function sessionStart(input, file) {
   });
 }
 
-function stop(file) {
+function stop(file, cwd) {
+  const store = new CanonStore(join(cwd, ".canon"));
   return mutateState(file, (state) => {
-    const pending = [...new Set(state.pending)];
+    const pending = new Map(state.pending.map((entry) => [entry.path, entry.fingerprint]));
     state.pending = [];
-    if (!pending.length) return undefined;
+    const stale = [...pending].flatMap(([path, fingerprint]) => {
+      const article = store.read(path);
+      return fingerprint !== null && article
+        && articleFingerprint(article) !== fingerprint ? [] : [path];
+    });
+    if (!stale.length) return undefined;
     return (
-      `[pi-canon] Touched but not updated: ${pending.join(", ")}. If this work changed what is true, `
+      `[pi-canon] Touched but not updated: ${stale.join(", ")}. If this work changed what is true, `
       + "update the article with pi_canon; if nothing durable changed, leave it."
     );
   });
@@ -195,7 +232,7 @@ try {
         hookSpecificOutput: { hookEventName: event, additionalContext: context },
       } : {})}\n`);
     } else if (event === "Stop" && !input.stop_hook_active) {
-      const reason = existsSync(file) ? stop(file) : undefined;
+      const reason = existsSync(file) ? stop(file, cwd) : undefined;
       process.stdout.write(`${JSON.stringify(reason ? { decision: "block", reason } : {})}\n`);
     } else {
       process.stdout.write("{}\n");

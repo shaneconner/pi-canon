@@ -14,7 +14,7 @@ const jiti = createJiti(import.meta.url);
 
 const { CanonStore, normalize } = await jiti.import(join(projectRoot, "extensions/lib/store.ts"));
 const { advise, unretained, BODY_WARN_CHARS, BODY_LARGE_CHARS, CAPSULE_CHARS } = await jiti.import(join(projectRoot, "extensions/lib/lint.ts"));
-const { Surfacer } = await jiti.import(join(projectRoot, "extensions/lib/surfacing.ts"));
+const { changesAssets, Surfacer } = await jiti.import(join(projectRoot, "extensions/lib/surfacing.ts"));
 const { buildRetriever, governsAnAsset, intentQuery, LexicalRetriever, residue, RULE_SCOPE, userIntent } =
   await jiti.import(join(projectRoot, "extensions/lib/retrieval.ts"));
 const { registerPiCanon } = await jiti.import(join(projectRoot, "extensions/canon.ts"));
@@ -972,27 +972,41 @@ pass("every surfaced line records what it cost and how relevant it was thought t
 const surfSettle = new Surfacer([{ name: "", dir: projDir, store }]);
 surfSettle.collect([join(projDir, "src/core/config.ts")]);
 surfSettle.flush();
+assert.equal(surfSettle.settleNudge(), undefined, "a read-only touch creates no update obligation");
+surfSettle.markChanged([join(projDir, "src/core/config.ts")]);
 const settle = surfSettle.settleNudge();
 assert.match(settle, /Touched but not updated: src\/core\/config/);
 assert.equal(surfSettle.settleNudge(), undefined);
-pass("settle reminds once per batch of touches");
+pass("settle is quiet for reads and reminds once after a successful modifying call");
+
+assert.equal(changesAssets("Read", { file_path: "src/core/config.ts" }), false);
+assert.equal(changesAssets("Grep", { path: "src/core/config.ts" }), false);
+assert.equal(changesAssets("exec_command", { cmd: "sed -n '1,20p' src/core/config.ts" }), false);
+assert.equal(changesAssets("exec_command", { cmd: "git diff -- src/core/config.ts" }), false);
+assert.equal(changesAssets("exec_command", { cmd: "git stash push -- src/core/config.ts" }), false);
+assert.equal(changesAssets("exec_command", { cmd: "sed -i 's/x/y/' src/core/config.ts" }), true);
+assert.equal(changesAssets("functions.apply_patch", "*** Update File: src/core/config.ts"), true);
+pass("only positive write, edit, patch, or mutating-shell evidence arms an update reminder");
 
 const surfDone = new Surfacer([{ name: "", dir: projDir, store }]);
 surfDone.collect([join(projDir, "src/core/config.ts")]);
+surfDone.markChanged([join(projDir, "src/core/config.ts")]);
 surfDone.flush();
 surfDone.markUpdated("src/core/config");
 assert.equal(surfDone.settleNudge(), undefined);
 pass("an updated article draws no settle reminder");
 
 surfDone.collect([join(projDir, "src/core/config.ts")]);
+surfDone.markChanged([join(projDir, "src/core/config.ts")]);
 assert.match(surfDone.settleNudge(), /Touched but not updated: src\/core\/config/);
-pass("an update does not exempt an article from later batches");
+pass("an update does not exempt an article from later modifying calls");
 
 const surfOrder = new Surfacer([{ name: "", dir: projDir, store }]);
 surfOrder.markUpdated("src/core/config");
 surfOrder.collect([join(projDir, "src/core/config.ts")]);
+surfOrder.markChanged([join(projDir, "src/core/config.ts")]);
 assert.match(surfOrder.settleNudge(), /Touched but not updated: src\/core\/config/);
-pass("a touch after an update still draws the reminder");
+pass("a modifying call after an update still draws the reminder");
 
 /* --- wiring --------------------------------------------------------------------- */
 
@@ -1037,10 +1051,10 @@ registerPiCanon(fakePi, {});
 assert.equal(tools.length, 1);
 assert.equal(tools[0].name, "pi_canon");
 assert.ok(
-  handlers.tool_call && handlers.session_start && handlers.turn_end &&
+  handlers.tool_call && handlers.tool_result && handlers.session_start && handlers.turn_end &&
   handlers.agent_settled && handlers.context,
 );
-pass("registration wires the tool and the five events");
+pass("registration wires the tool and the six events");
 
 const notices = [];
 const ctx = { cwd: projDir, ui: { notify: (msg, level) => notices.push({ msg, level }) } };
@@ -1064,16 +1078,33 @@ assert.equal(sent.length, 1);
 pass("repeat touches and pi_canon's own calls stay silent");
 
 for (const fn of handlers.agent_settled) fn(undefined, ctx);
+assert.equal(sent.length, 1);
+pass("a read-only Pi session settles without an update reminder");
+
+for (const fn of handlers.tool_call) fn({
+  toolName: "edit", toolCallId: "t5", input: { path: join(projDir, "src/core/config.ts") },
+}, ctx);
+for (const fn of handlers.tool_result) fn({ toolName: "edit", toolCallId: "t5", isError: false }, ctx);
+for (const fn of handlers.agent_settled) fn(undefined, ctx);
 assert.equal(sent.length, 2);
 assert.match(sent[1].msg.content, /Touched but not updated/);
 assert.equal(sent[1].opts.deliverAs, "nextTurn");
-pass("settle delivers the write after reminder for the next turn");
+pass("a successful Pi edit delivers the write-after reminder for the next turn");
+
+for (const fn of handlers.tool_call) fn({
+  toolName: "edit", toolCallId: "t6", input: { path: join(projDir, "src/core/config.ts") },
+}, ctx);
+for (const fn of handlers.tool_result) fn({ toolName: "edit", toolCallId: "t6", isError: true }, ctx);
+for (const fn of handlers.agent_settled) fn(undefined, ctx);
+assert.equal(sent.length, 2);
+pass("a failed Pi edit creates no update reminder");
 
 /* A send that throws must not leave the package believing the agent was told. Both
    flush and settle commit their work before handing the message over, because the
    message is built from that work, so a failed send has to put it back. */
 const surfUndo = new Surfacer([{ name: "", dir: projDir, store }]);
 surfUndo.collect([join(projDir, "src/feed/sync.ts")]);
+surfUndo.markChanged([join(projDir, "src/feed/sync.ts")]);
 const firstTry = surfUndo.flush();
 assert.match(firstTry, /src\/feed\/sync/);
 assert.equal(surfUndo.stats.present, 1);
@@ -1832,6 +1863,35 @@ assert.equal("PostToolUse" in claudeHooks.hooks, false);
 assert.ok(existsSync(join(pluginRoot, "skills/pi-canon/SKILL.md")));
 pass("one plugin gives Codex per-tool hooks and Claude Code a per-batch hook");
 
+const codexHookCommands = Object.values(codexHooks.hooks)
+  .flatMap((groups) => groups)
+  .flatMap((group) => group.hooks)
+  .map((handler) => handler.command);
+assert.equal(new Set(codexHookCommands).size, 1, "every Codex lifecycle event uses one launcher");
+const removedPluginRoot = join(pluginRoot, "..", "pi-canon-removed-cache-root");
+const fallbackHookData = mkdtempSync(join(tmpdir(), "pi-canon-hook-fallback-data-"));
+const fallbackHook = spawnSync(codexHookCommands[0], {
+  shell: true,
+  cwd: projectRoot,
+  encoding: "utf8",
+  input: `${JSON.stringify({
+    session_id: "removed-cache-root-gate",
+    cwd: projectRoot,
+    hook_event_name: "SessionStart",
+    source: "startup",
+  })}\n`,
+  env: {
+    ...process.env,
+    PLUGIN_ROOT: removedPluginRoot,
+    CLAUDE_PLUGIN_ROOT: removedPluginRoot,
+    PLUGIN_DATA: fallbackHookData,
+    PI_CANON_CALLER: "codex",
+  },
+});
+assert.equal(fallbackHook.status, 0, fallbackHook.stderr);
+assert.deepEqual(JSON.parse(fallbackHook.stdout), {});
+pass("a Codex hook recovers when an open session retains a removed plugin cache root");
+
 const codexMarketplace = JSON.parse(
   readFileSync(join(projectRoot, ".agents/plugins/marketplace.json"), "utf8"),
 );
@@ -1943,12 +2003,52 @@ assert.match(resurfacedAfterCompact.hookSpecificOutput.additionalContext, /src\/
 assert.deepEqual(runHook({
   hook_event_name: "PostToolUse", tool_name: "Read", tool_input: { file_path: "src/config.ts" },
 }), {}, "the article surfaces once in the new compaction cycle");
+assert.deepEqual(runHook({
+  hook_event_name: "PostToolUse", tool_name: "Grep", tool_input: { path: "src/other.ts", pattern: "other" },
+}), {}, "read-only Grep does not re-surface an article already seen in this cycle");
+assert.deepEqual(runHook({
+  hook_event_name: "PostToolUse",
+  tool_name: "exec_command",
+  tool_input: { cmd: "sed -n '1,20p' src/config.ts src/other.ts" },
+}), {}, "an inspection-only exec stays quiet after its articles have surfaced");
+assert.deepEqual(runHook({ hook_event_name: "Stop" }), {},
+  "Read, Grep, and inspection-only exec calls create no stop reminder");
+
+assert.deepEqual(runHook({
+  hook_event_name: "PostToolUse", tool_name: "Edit", tool_input: { file_path: "src/config.ts" },
+}), {}, "an edit still stays quiet until Stop when its article is already visible");
+assert.deepEqual(runHook({
+  hook_event_name: "PostToolUse",
+  tool_name: "exec_command",
+  tool_input: { cmd: "sed -i 's/other/changed/' src/other.ts" },
+}), {}, "a mutating exec also defers its reminder until Stop");
 const reminder = runHook({ hook_event_name: "Stop" });
 assert.equal(reminder.decision, "block");
 assert.match(reminder.reason, /src\/other/);
 assert.match(reminder.reason, /src\/config/);
 assert.deepEqual(runHook({ hook_event_name: "Stop" }), {}, "the stop reminder fires once per batch");
-pass("the Codex hook surfaces touched articles once per compaction cycle");
+pass("the Codex hook keeps read-only sessions clean and reminds after modifying calls");
+
+assert.deepEqual(runHook({
+  hook_event_name: "PostToolUse",
+  tool_name: "functions.exec",
+  tool_input: { source: 'await tools.apply_patch("*** Update File: src/config.ts")' },
+}), {}, "an orchestrated patch arms an update obligation");
+hookStore.write("src/config", {
+  capsule: "Environment overrides defaults.",
+  body: "Defaults load first. Environment values replace them.",
+});
+assert.deepEqual(runHook({ hook_event_name: "Stop" }), {},
+  "a canon write hidden inside the orchestration wrapper satisfies the obligation by fingerprint");
+assert.deepEqual(runHook({
+  hook_event_name: "PostToolUse",
+  tool_name: "functions.exec",
+  tool_input: { source: 'await tools.apply_patch("*** Update File: src/config.ts")' },
+}), {}, "a later orchestrated patch records the updated article as its new baseline");
+const laterReminder = runHook({ hook_event_name: "Stop" });
+assert.equal(laterReminder.decision, "block");
+assert.match(laterReminder.reason, /src\/config/);
+pass("hidden canon writes clear only the mutations that precede them");
 
 const runClaudeHook = (payload) => runHook(payload, "claude-code", "hook-gate-claude");
 assert.deepEqual(runClaudeHook({ hook_event_name: "SessionStart", source: "startup" }), {});
@@ -1965,6 +2065,15 @@ assert.match(batch.hookSpecificOutput.additionalContext, /what this tool batch t
 assert.equal(batch.hookSpecificOutput.additionalContext.match(/src\/config/g)?.length, 1,
   "the batch deduplicates one article reached by two tools");
 assert.equal(batch.hookSpecificOutput.additionalContext.match(/src\/other/g)?.length, 1);
+assert.deepEqual(runClaudeHook({ hook_event_name: "Stop" }), {},
+  "a read-only Claude batch creates no stop reminder");
+assert.deepEqual(runClaudeHook({
+  hook_event_name: "PostToolBatch",
+  tool_calls: [{ tool_name: "Edit", tool_input: { file_path: "src/config.ts" } }],
+}), {}, "a modifying call does not duplicate a capsule already visible in the cycle");
+const claudeReminder = runClaudeHook({ hook_event_name: "Stop" });
+assert.equal(claudeReminder.decision, "block");
+assert.match(claudeReminder.reason, /src\/config/);
 assert.deepEqual(runClaudeHook({
   hook_event_name: "PostToolBatch",
   tool_calls: [{ tool_name: "Read", tool_input: { file_path: "src/config.ts" } }],

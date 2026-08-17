@@ -30,6 +30,52 @@ function trace(kind: string, data: Record<string, unknown>): void {
 
 const PATHLIKE = /(?:^|[\s"'`=:,([{])(\/?[\w.@-]+(?:\/[\w.@-]+)+)/g;
 
+/* A touch says what knowledge should surface. It does not by itself say that current
+   truth changed. The write-after reminder needs positive evidence of a modifying tool,
+   otherwise Read, Grep, and inspection-only shell calls turn an optional maintenance
+   prompt into a false stop. This list stays deliberately small: an unknown tool may
+   surface an article, but it cannot create an update obligation merely by naming a path. */
+const MUTATING_TOOL_SUFFIXES = [
+  "applypatch",
+  "write",
+  "writefile",
+  "edit",
+  "editfile",
+  "multiedit",
+  "notebookedit",
+  "createfile",
+  "deletefile",
+  "movefile",
+  "renamefile",
+  "replaceinfile",
+  "strreplaceeditor",
+];
+
+const SHELL_TOOL_SUFFIXES = ["bash", "shell", "exec", "execcommand", "runcommand", "terminal"];
+
+function stringsIn(value: unknown): string[] {
+  if (typeof value === "string") return [value];
+  if (Array.isArray(value)) return value.flatMap(stringsIn);
+  if (!value || typeof value !== "object") return [];
+  return Object.values(value).flatMap(stringsIn);
+}
+
+export function changesAssets(toolName: unknown, input: unknown): boolean {
+  if (typeof toolName !== "string" || !toolName) return false;
+  const compact = toolName.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  if (MUTATING_TOOL_SUFFIXES.some((suffix) => compact.endsWith(suffix))) return true;
+  if (!SHELL_TOOL_SUFFIXES.some((suffix) => compact.endsWith(suffix))) return false;
+
+  const command = stringsIn(input).join("\n");
+  if (/\btools\.apply_patch\s*\(/.test(command)) return true;
+  if (/(?:^|[\n;&|]\s*)(?:sudo\s+)?(?:[\w.-]+\/)*(?:apply_patch|cp|mv|rm|mkdir|rmdir|touch|chmod|chown|ln|install|truncate|dd|patch)\b/m.test(command)) {
+    return true;
+  }
+  if (/\bsed\s+(?:-[a-z]*i[a-z]*\b|--in-place(?:=|\b))/i.test(command)) return true;
+  if (/\bperl\s+-[a-z]*pi[a-z]*\b/i.test(command)) return true;
+  return /\bgit\s+(?:apply|checkout|restore|reset|clean|mv|rm)\b/.test(command);
+}
+
 /* Presence marks -----------------------------------------------------------------
 
    "Seen" used to mean "we sent it once", which is only the same thing as "the agent
@@ -510,6 +556,18 @@ export class Surfacer {
     }
   }
 
+  /* Record a successful modifying call separately from a touch. A read still stages the
+     governing article, but it creates no update obligation. */
+  markChanged(assets: string[]): void {
+    for (const asset of assets) {
+      const { mount, absolute } = this.locate(asset);
+      const article = mount.store.resolve(absolute, mount.dir);
+      if (!article) continue;
+      const key = mount.name ? `${mount.name}:${article.path}` : article.path;
+      this.pendingUpdates.add(key);
+    }
+  }
+
   /* Stage each newly touched governing article. Nothing is sent or spent here. */
   collect(assets: string[]): void {
     for (const asset of assets) {
@@ -517,7 +575,6 @@ export class Surfacer {
       const article = mount.store.resolve(absolute, mount.dir);
       if (!article) continue;
       const key = mount.name ? `${mount.name}:${article.path}` : article.path;
-      this.pendingUpdates.add(key);
       if (this.seen.has(key) || this.staged.has(key)) continue;
       const stamp = article.updated ? ` (updated ${article.updated})` : "";
       this.staged.set(key, { capsule: article.capsule, stamp, asset });
@@ -607,8 +664,8 @@ export class Surfacer {
     trace("delivery-undone", {});
   }
 
-  /* The write-after half of the doctrine: every governing article touched since its
-     last update draws one reminder, then the slate clears for the next batch. */
+  /* The write-after half of the doctrine: every governing article named by a successful
+     modifying call since its last update draws one reminder, then the slate clears. */
   settleNudge(): string | undefined {
     const stale = [...this.pendingUpdates];
     this.lastNudge = stale;

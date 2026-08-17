@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/pi-canon-hook.mjs\"",
+            "command": "root=\"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}\"; script=\"$root/scripts/pi-canon-hook.mjs\"; if [ ! -f \"$script\" ]; then parent=\"${root%/*}\"; for candidate in \"$parent\"/*/scripts/pi-canon-hook.mjs; do [ -f \"$candidate\" ] && script=\"$candidate\"; done; fi; exec node \"$script\"",
             "timeout": 5
           }
         ]
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/pi-canon-hook.mjs\"",
+            "command": "root=\"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}\"; script=\"$root/scripts/pi-canon-hook.mjs\"; if [ ! -f \"$script\" ]; then parent=\"${root%/*}\"; for candidate in \"$parent\"/*/scripts/pi-canon-hook.mjs; do [ -f \"$candidate\" ] && script=\"$candidate\"; done; fi; exec node \"$script\"",
             "timeout": 5
           }
         ]
@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/pi-canon-hook.mjs\"",
+            "command": "root=\"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}\"; script=\"$root/scripts/pi-canon-hook.mjs\"; if [ ! -f \"$script\" ]; then parent=\"${root%/*}\"; for candidate in \"$parent\"/*/scripts/pi-canon-hook.mjs; do [ -f \"$candidate\" ] && script=\"$candidate\"; done; fi; exec node \"$script\"",
             "timeout": 5
           }
         ]

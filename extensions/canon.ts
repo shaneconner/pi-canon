@@ -4,7 +4,7 @@ import { appendFileSync } from "node:fs";
 import { basename, isAbsolute, join } from "node:path";
 import { buildRetriever, type RetrievalOption } from "./lib/retrieval.ts";
 import { CanonStore } from "./lib/store.ts";
-import { Surfacer, type Mount } from "./lib/surfacing.ts";
+import { changesAssets, Surfacer, type Mount } from "./lib/surfacing.ts";
 import { buildCanonTool, type CanonRuntime } from "./lib/tool.ts";
 
 export interface CanonOptions {
@@ -87,6 +87,7 @@ export function registerPiCanon(pi: any, options: CanonOptions = {}): void {
   }
 
   let runtime: CanonRuntime | undefined;
+  const modifyingCalls = new Map<string, string[]>();
 
   const ready = (ctx: any): CanonRuntime => {
     if (!runtime) {
@@ -124,6 +125,7 @@ export function registerPiCanon(pi: any, options: CanonOptions = {}): void {
      doctrine rides the tool description, which every session carries anyway. */
   pi.on("session_start", (_event: unknown, ctx: any) => {
     runtime = undefined;
+    modifyingCalls.clear();
     ready(ctx);
   });
 
@@ -141,8 +143,21 @@ export function registerPiCanon(pi: any, options: CanonOptions = {}): void {
   pi.on("tool_call", (event: any, ctx: any) => {
     if (!surface || event?.toolName === "pi_canon") return;
     const { surfacer } = ready(ctx);
-    surfacer.collect(surfacer.pathsIn(event?.input));
+    const assets = surfacer.pathsIn(event?.input);
+    surfacer.collect(assets);
     surfacer.noteIntent(event?.toolName, event?.input);
+    if (typeof event?.toolCallId === "string" && changesAssets(event?.toolName, event?.input)) {
+      modifyingCalls.set(event.toolCallId, assets);
+    }
+  });
+
+  /* A change-capable call arms the reminder only after it actually returns without an
+     error. Calls blocked before execution and failed edits therefore stay read-only. */
+  pi.on("tool_result", (event: any, ctx: any) => {
+    if (!surface || typeof event?.toolCallId !== "string") return;
+    const assets = modifyingCalls.get(event.toolCallId);
+    modifyingCalls.delete(event.toolCallId);
+    if (assets && event?.isError !== true) ready(ctx).surfacer.markChanged(assets);
   });
 
   pi.on("turn_end", (_event: unknown, ctx: any) => {
