@@ -1178,7 +1178,9 @@ pass("an empty-string body or capsule leaves stored content untouched");
 store.write("src/capped", { capsule: "Capped.", body: "b" });
 for (let n = 1; n <= 5; n += 1) store.journal({ body: `Event ${n}.`, slug: "capped-event", subject: ["src/capped"] });
 const capped = await tools[0].execute("id", { action: "read", path: "src/capped" }, undefined, undefined, ctx);
-assert.match(capped.content[0].text, /journal: [^\n]+ and 2 earlier$/);
+/* Not $-anchored: src/capped has no asset in this fixture, so the orphan advisory
+   legitimately follows the index. */
+assert.match(capped.content[0].text, /journal: [^\n]+ and 2 earlier/);
 assert.equal(capped.content[0].text.split("journal: ")[1].split(" and ")[0].split(", ").length, 3);
 assert.ok(!capped.content[0].text.includes("Event "));
 pass("the journal index shows the newest three filenames and no content");
@@ -2256,5 +2258,27 @@ const changedCapsule = await canon({ action: "write", path: "src/steady", capsul
 assert.match(changedCapsule, /Wrote src\/steady\./);
 assert.notEqual(readFileSync(steadyFile, "utf8"), steadyBytes);
 pass("an identical write reports already current and leaves the file untouched; a real change still lands");
+
+/* The orphan question: an article whose asset went missing warns on read and write,
+   but only when its neighborhood is real. A nested address whose parent directory
+   exists on disk while nothing matches the asset (file, stem, or directory) is the
+   rename-or-delete case; a store of purely conceptual addresses, whose parents never
+   existed, stays silent, as do root-level addresses and declared rules. */
+mkdirSync(join(schemaProj, "pkg"), { recursive: true });
+writeFileSync(join(schemaProj, "pkg", "kept.ts"), "export const kept = 1;\n");
+const keptWrite = await canon({ action: "write", path: "pkg/kept", capsule: "Kept.", body: "# Kept\nGoverns pkg/kept.ts." });
+assert.doesNotMatch(keptWrite, /No asset on disk/);
+const goneWrite = await canon({ action: "write", path: "pkg/gone", capsule: "Gone.", body: "# Gone\nAsset deleted." });
+assert.match(goneWrite, /No asset on disk matches pkg\/gone, though its parent directory exists/);
+assert.match(goneWrite, /move this article|scope rule/);
+const goneRead = await canon({ action: "read", path: "pkg/gone" });
+assert.match(goneRead, /No asset on disk matches pkg\/gone/);
+const conceptual = await canon({ action: "write", path: "decisions/naming", capsule: "Conceptual.", body: "# Naming\nNo decisions/ dir exists." });
+assert.doesNotMatch(conceptual, /No asset on disk/);
+const rootLevel = await canon({ action: "write", path: "overview", capsule: "Root-level.", body: "# Overview\nConventional address." });
+assert.doesNotMatch(rootLevel, /No asset on disk/);
+const declaredRule = await canon({ action: "write", path: "pkg/review-rule", scope: "rule", capsule: "A rule.", body: "# Review rule\nAlways run the suite." });
+assert.doesNotMatch(declaredRule, /No asset on disk/);
+pass("an orphaned article warns on read and write; conceptual, root-level, and declared-rule addresses stay silent");
 
 console.log(`\nall ${gates} gates green`);

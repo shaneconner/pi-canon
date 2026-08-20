@@ -1,6 +1,8 @@
 /* Advisory only: advice strings, never a refusal. A blocked write teaches an agent
    to stop writing; a warning teaches it what to do next. */
 
+import { statSync } from "node:fs";
+import { join } from "node:path";
 import { governsAnAsset, RULE_SCOPE } from "./retrieval.ts";
 import type { CanonSchema } from "./schema.ts";
 import { normalize, type Article, type CanonStore } from "./store.ts";
@@ -216,4 +218,31 @@ export function advise(
 function parentOf(path: string): string {
   const cut = path.lastIndexOf("/");
   return cut === -1 ? "" : path.slice(0, cut);
+}
+
+/* The article whose asset went missing: the complement scope: rule was designed
+   against, finally checked from the other side. Fires only when the address is
+   nested and its PARENT directory really exists on disk, so a store of purely
+   conceptual addresses (a knowledge base whose articles never mapped to files)
+   stays silent: the rename-or-delete case this catches is precisely an article
+   whose neighborhood is real while its asset is not. Root-level addresses are
+   conventional (a project or concept name) and are never questioned. Advisory
+   on read and write, never a refusal, because the agent holding the article is
+   the one positioned to heal it. */
+export function orphaned(dir: string, article: Article): string | undefined {
+  if (article.scope === RULE_SCOPE) return undefined;
+  const cut = article.path.lastIndexOf("/");
+  if (cut === -1) return undefined;
+  try {
+    if (!statSync(join(dir, article.path.slice(0, cut))).isDirectory()) return undefined;
+  } catch {
+    return undefined;
+  }
+  if (governsAnAsset(dir, article.path)) return undefined;
+  return (
+    `No asset on disk matches ${article.path}, though its parent directory exists. ` +
+    "If the asset moved, move this article to the new address; if the asset is gone, " +
+    "fold what still matters into the parent article and journal the retirement; if the " +
+    "address is deliberate, write it with scope rule."
+  );
 }

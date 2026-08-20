@@ -3,7 +3,7 @@
 
 import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
-import { advise, unretained } from "./lint.ts";
+import { advise, orphaned, unretained } from "./lint.ts";
 import { checkArticle, loadSchema, READ_ONLY, SCHEMA_FILE } from "./schema.ts";
 import { contained, normalize, type CanonStore } from "./store.ts";
 import { type Candidate, LexicalRetriever, RULE_SCOPE } from "./retrieval.ts";
@@ -263,7 +263,9 @@ export function runCanon(runtime: CanonRuntime, params: Record<string, unknown>)
       const report = issues.length
         ? `\n\nschema (${SCHEMA_FILE}): ${issues.join(" ")} This article can be healed with a write.`
         : "";
-      return `${title}\n${head}\n\n${article.body}`.trim() + index + report;
+      const missing = orphaned(mount.dir, article);
+      const orphan = missing ? `\n\n${missing}` : "";
+      return `${title}\n${head}\n\n${article.body}`.trim() + index + report + orphan;
     }
     case "write": {
       if (!path) return "write needs a path.";
@@ -334,11 +336,13 @@ export function runCanon(runtime: CanonRuntime, params: Record<string, unknown>)
         qualify(article.path),
         [params.capsule, params.body].filter(Boolean).map(String).join("\n"),
       );
+      const missingAsset = orphaned(mount.dir, article);
       return [
         `Wrote ${qualify(article.path)}.`,
         ...verdict.warnings.map((line) => `schema: ${line}`),
         ...problems,
         ...advise(article, store, prior?.body, { dir: mount.dir, retrieval: runtime.retrieval }, schema),
+        ...(missingAsset ? [missingAsset] : []),
       ].join("\n");
     }
     case "journal": {
