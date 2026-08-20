@@ -34,6 +34,13 @@ export const CANON_TOOL_PARAMETERS = {
     },
     capsule: { type: "string", description: "write: one dense line injected when the asset is touched." },
     query: { type: "string", description: "search: words to look for, across articles and the journal." },
+    journal: {
+      type: "boolean",
+      description:
+        "search: true to include journal entries in the results. Off by default because " +
+        "events are history, not current truth; the result names how many entries matched " +
+        "so you can opt in when the history is the point.",
+    },
     scope: {
       type: "string",
       enum: ["rule", "asset"],
@@ -159,18 +166,17 @@ function filingTail(retrieval: string): string {
    Ranking reuses LexicalRetriever rather than growing a second notion of relevance, so search
    and recommendation cannot drift apart.
 
-   Articles are guaranteed half the window. Measured on the two largest real stores
-   (R1, 2026-08-20, 504 known-item queries mined from journal subjects): in one
-   combined ranking, journal entries about an event crowd out the article that
-   carries its current truth, costing 8 to 20 points of governing-article recall at
-   realistic query lengths, because an event and its article share vocabulary and
-   the journal says it more often. So the ranking is one pass but the window is
-   split: articles fill up to half, journal entries the rest, and whichever side
-   runs short cedes its slots to the other. Current truth first, history behind it. */
+   The journal is opt-in (Shane, 2026-08-20): events are history, not current truth,
+   and R1 measured what including them by default cost, journal entries about an
+   event crowding out the article that carries its current truth for 8 to 20 points
+   of governing-article recall at realistic query lengths. Default search ranks
+   articles alone, never reads a journal body, and says the journal exists; with
+   journal true the window is split, articles up to half, journal the rest,
+   whichever side runs short ceding its slots. Current truth first, always. */
 const SEARCH_RESULTS = 10;
 const ARTICLE_SLOTS = 5;
 
-function search(store: CanonStore, query: string): string {
+function search(store: CanonStore, query: string, includeJournal: boolean): string {
   if (!query.trim()) return "search needs a query.";
   const articles: Candidate[] = [];
   for (const path of store.list()) {
@@ -186,20 +192,26 @@ function search(store: CanonStore, query: string): string {
     }
   }
   /* Journal entries enter the same index under a `journal/` key so one ranking covers both.
-     The key is an index handle, never an address: it is not something `read` accepts. */
-  const entries = store.journalEntries();
+     The key is an index handle, never an address: it is not something `read` accepts.
+     Built only on opt-in, so a default search never pays for reading every entry body. */
   const byKey = new Map<string, { logged: string; subjects: string[]; body: string }>();
-  const journal: Candidate[] = entries.map((entry) => {
-    const key = `journal/${entry.name.replace(/\.md$/, "")}`;
-    byKey.set(key, entry);
-    return {
-      path: key,
-      capsule: entry.subjects.join(", "),
-      body: entry.body,
-      updated: entry.logged,
-      declared: false,
-    };
-  });
+  const journal: Candidate[] = !includeJournal
+    ? []
+    : store.journalEntries().map((entry) => {
+        const key = `journal/${entry.name.replace(/\.md$/, "")}`;
+        byKey.set(key, entry);
+        return {
+          path: key,
+          capsule: entry.subjects.join(", "),
+          body: entry.body,
+          updated: entry.logged,
+          declared: false,
+        };
+      });
+  const invitation =
+    !includeJournal && store.journalCount() > 0
+      ? "The journal was not searched; pass journal true to search events too."
+      : "";
 
   const all = [...articles, ...journal];
   if (!all.length) return "Nothing in the canon yet.";
@@ -207,7 +219,7 @@ function search(store: CanonStore, query: string): string {
   retriever.index(all);
   const scored = retriever.score(query, all);
   const ranked = [...scored.entries()].sort((a, b) => b[1] - a[1]);
-  if (!ranked.length) return `Nothing matches "${query}".`;
+  if (!ranked.length) return [`Nothing matches "${query}".`, invitation].filter(Boolean).join(" ");
 
   const articleRanked = ranked.filter(([key]) => !byKey.has(key));
   const journalRanked = ranked.filter(([key]) => byKey.has(key));
@@ -231,6 +243,7 @@ function search(store: CanonStore, query: string): string {
   if (ranked.length > chosen.length) {
     lines.push(`... ${ranked.length - chosen.length} more matched; narrow the query to see them.`);
   }
+  if (invitation) lines.push(invitation);
   return lines.join("\n");
 }
 
@@ -408,7 +421,7 @@ export function runCanon(runtime: CanonRuntime, params: Record<string, unknown>)
     case "map":
       return store.map(path);
     case "search":
-      return search(store, String(params.query ?? ""));
+      return search(store, String(params.query ?? ""), params.journal === true);
     default:
       return `Unknown action "${action}". Actions: read, write, journal, map, search.`;
   }

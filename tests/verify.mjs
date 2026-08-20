@@ -1779,11 +1779,11 @@ pass("the value check stays silent with no article and with no values");
 
 
 /* Search: agent-solicited, and unlike surfacing it is not limited to addresses. Surfacing on
-   touch is address only; search reaches anything, journal entries included, and those have no
-   address at all. Every result has to carry what SCOPES it, because a result that does not is
-   the failure mode a 259 KB flat memory demonstrated: every answer string appeared, but scoped
-   facts averaged only 0.33 of 5, because 201 answer occurrences arrived with nothing saying
-   which situation each applied to. */
+   touch is address only; search reaches anything, journal entries included WHEN OPTED IN, and
+   those have no address at all. Every result has to carry what SCOPES it, because a result
+   that does not is the failure mode a 259 KB flat memory demonstrated: every answer string
+   appeared, but scoped facts averaged only 0.33 of 5, because 201 answer occurrences arrived
+   with nothing saying which situation each applied to. */
 const searched = await tools[0].execute(
   "id", { action: "search", query: "config loading truth" }, undefined, undefined, ctx);
 assert.match(searched.content[0].text, /src\/core\/config/,
@@ -1801,13 +1801,17 @@ registerPiCanon(
   { registerTool: (t) => jtools.push(t), on() {}, registerCommand() {} },
   { root: jstore.root },
 );
-const hit = await jtools[0].execute(
+const noOptIn = await jtools[0].execute(
   "id", { action: "search", query: "ops-bot misattributed actions" }, undefined, undefined, jctx);
+assert.doesNotMatch(noOptIn.content[0].text, /^journal /m, "no journal results without opt-in");
+assert.match(noOptIn.content[0].text, /pass journal true/, "and the door is named");
+const hit = await jtools[0].execute(
+  "id", { action: "search", query: "ops-bot misattributed actions", journal: true }, undefined, undefined, jctx);
 const text = hit.content[0].text;
-assert.match(text, /^journal /m, "a journal entry is a first class search result");
+assert.match(text, /^journal /m, "a journal entry is a first class search result on opt-in");
 assert.match(text, /ops\/billing/, "and it carries the subjects that scope it");
 assert.doesNotMatch(text, /undefined/, "with no undefined fields in the rendering");
-pass("search reaches the journal, which has no address, and scopes it by instant and subject");
+pass("the journal is searched only on opt-in, is invited by name, and opted-in entries are scoped by instant and subject");
 
 const empty = await jtools[0].execute(
   "id", { action: "search", query: "   " }, undefined, undefined, jctx);
@@ -2281,30 +2285,34 @@ const declaredRule = await canon({ action: "write", path: "pkg/review-rule", sco
 assert.doesNotMatch(declaredRule, /No asset on disk/);
 pass("an orphaned article warns on read and write; conceptual, root-level, and declared-rule addresses stay silent");
 
-/* Search guarantees articles half the window. R1 (2026-08-20, 504 known-item
-   queries on the two largest real stores) measured journal entries about an event
-   crowding out the article carrying its current truth: one combined top-10 cost 8
-   to 20 points of governing-article recall. The split is mechanical: articles get
-   up to five slots, journal the rest, and a short side cedes its slots. */
+/* The journal is opt-in for search, and opted in it takes at most half the window.
+   R1 (2026-08-20, 504 known-item queries on the two largest real stores) measured
+   journal entries about an event crowding out the article carrying its current
+   truth: one combined top-10 cost 8 to 20 points of governing-article recall. The
+   default excludes the journal entirely (events are history, not current truth)
+   and never reads an entry body; opted in, articles keep up to five slots, journal
+   the rest, and a short side cedes its slots. */
 await canon({ action: "write", path: "svc/flux", capsule: "Owns the fluxcap budget.", body: "# Flux\nThe fluxcap lives here." });
 for (let n = 0; n < 12; n += 1) {
   await canon({ action: "journal", body: `fluxcap fluxcap fluxcap event ${n} touched the fluxcap again.`, slug: `flux-${n}`, subject: ["svc/flux"] });
 }
 const crowded = await canon({ action: "search", query: "fluxcap" });
 assert.match(crowded, /svc\/flux: Owns the fluxcap budget\./);
-assert.match(crowded, /more matched; narrow the query/);
+assert.equal(crowded.split("\n").filter((l) => l.startsWith("journal ")).length, 0);
+assert.match(crowded, /journal was not searched; pass journal true/);
 for (let n = 0; n < 7; n += 1) {
   await canon({ action: "write", path: `svc/flux${n}`, capsule: `fluxcap sibling ${n}.`, body: `# Flux ${n}\nMore fluxcap facts.` });
 }
-const split = await canon({ action: "search", query: "fluxcap" });
+const split = await canon({ action: "search", query: "fluxcap", journal: true });
 const splitLines = split.split("\n").filter((l) => !l.startsWith("..."));
 assert.equal(splitLines.filter((l) => l.startsWith("journal ")).length, 5);
 assert.equal(splitLines.filter((l) => l.startsWith("svc/flux")).length, 5);
+assert.doesNotMatch(split, /journal was not searched/);
 for (let n = 0; n < 7; n += 1) {
   await canon({ action: "write", path: `svc/steady${n}`, capsule: `steadyterm holder ${n}.`, body: `# Steady ${n}\nsteadyterm facts.` });
 }
-const spill = await canon({ action: "search", query: "steadyterm" });
+const spill = await canon({ action: "search", query: "steadyterm", journal: true });
 assert.equal(spill.split("\n").filter((l) => l.startsWith("svc/steady")).length, 7);
-pass("search splits the window five and five when both sides are rich, and a short side cedes its slots");
+pass("journal search is opt-in; opted in it splits the window five and five, and a short side cedes its slots");
 
 console.log(`\nall ${gates} gates green`);
