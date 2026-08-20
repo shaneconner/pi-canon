@@ -89,7 +89,7 @@ updated: 2026-08-11
 Resolution order is defaults, then config.toml, then environment. ...
 ```
 
-That is the whole storage format. `capsule` is the one dense line surfacing sends, collapsed to a single line on write whatever the agent sent. `updated` is the date of the last write, which is not the date the content last changed, and nothing compares it against the asset. Those two keys are the only ones pi-canon owns. Every other key in the block, Obsidian properties included, is carried through writes verbatim, and owned values are quoted only where plain YAML would misread them, so the tree stays editable by hand.
+That is the whole storage format. `capsule` is the one dense line surfacing sends, collapsed to a single line on write whatever the agent sent. `updated` is the date of the last write that changed something: a write identical to the stored article is a no-op that touches nothing, so the stamp is not refreshed by restatements, and nothing compares it against the asset. Those two keys are the only ones pi-canon owns. Every other key in the block, Obsidian properties included, is carried through writes verbatim, and owned values are quoted only where plain YAML would misread them, so the tree stays editable by hand.
 
 The result is plain Markdown and a valid Obsidian vault. Commit it with your repo: git is the history, diff, blame, and time machine, and pi-canon never runs git itself. Journal entries are ordinary files too. The tool only appends them; read them with normal file tools.
 
@@ -144,7 +144,7 @@ One tool, `pi_canon`, five actions: `read`, `write`, `journal`, `map`, and `sear
 | action | parameters | does |
 |---|---|---|
 | `read` | `path` | Returns the governing article: title, `capsule`, `updated`, body, and a one-line journal index. A miss returns a sentence naming the address and inviting a write after the task. When an ancestor answers, the title reads `<ancestor> governs <address>`, so the altitude is visible. |
-| `write` | `path`, `capsule`, `body`, `scope` | Creates or updates the article, then returns `Wrote <address>.` and any advisory lint. Never refuses. An empty string means untouched, not erase. |
+| `write` | `path`, `capsule`, `body`, `scope` | Creates or updates the article, then returns `Wrote <address>.` and any advisory lint. Never refuses. An empty string means untouched, not erase. A write identical to the stored article is reported as already current and touches nothing, so `updated` keeps meaning the date the content last changed. |
 | `journal` | `body`, `subject`, `slug` | Appends a dated entry as its own file, `<date>-<slug>[-n].md`. pi_canon can never rewrite one. An empty body gets a sentence back asking what happened. |
 | `map` | `path` (optional prefix) | One line per article as `address: capsule`, or a sentence when the store or the filter is empty. Output is unbounded. |
 | `search` | `query` | Ranks articles and journal entries against the words in one pass, ten results, each carrying what scopes it: an article its address and capsule, a journal entry its instant and subjects. Says how many matches the cap dropped. The one action that reaches the journal's content. |
@@ -153,9 +153,37 @@ One tool, `pi_canon`, five actions: `read`, `write`, `journal`, `map`, and `sear
 
 Entries logged with `subject` addresses come back as a one-line index of filenames, newest three, when those articles are read: history on offer, never loaded by default. The index carries filenames only and never entry content, and matching is exact, so an entry filed at `src/core/config` does not appear when `src/core` is read. The journal always lives in the project store.
 
-Lint on a write is advisory strings appended to the response, never a refusal, because a blocked write teaches an agent to stop writing while a warning teaches it what to do next. It warns past 8,000 characters of body and suggests going hierarchical past 20,000. It names a missing capsule, one over 1,000 characters, or one written as a change log. An address carrying a `log`, `journal`, `session`, `standup` or `meeting` segment, or an ISO date, draws a redirect to the journal. Dead wikilinks are named one line each.
+Lint on a write is advisory strings appended to the response, never a refusal, because a blocked write teaches an agent to stop writing while a warning teaches it what to do next. The one exception is a rule the store itself declared `required` in its schema, documented in [The article schema](#the-article-schema) below. It warns past 8,000 characters of body and suggests going hierarchical past 20,000. It names a missing capsule, one over 1,000 characters, or one written as a change log. An address carrying a `log`, `journal`, `session`, `standup` or `meeting` segment, or an ISO date, draws a redirect to the journal. Dead wikilinks are named one line each.
 
 One lint line is different in kind. When a write supplies a body and an article was already there, the new body is compared against the prior one, and a line that carried constraint language and disappeared is quoted back at the write that removed it. The vocabulary is fixed: `must`, `never`, `always`, `require` in its `requires` and `required` forms, `do not`, and `don't`. At most two lines are named per write, each cut to its first 160 characters, with the note that if the constraint still holds it should stay, and if it genuinely changed, the change belongs in the journal. The quote is a prefix rather than a summary. It is an advisory: the write already landed, and nothing can make an agent put the line back.
+
+## The article schema
+
+Every store carries its contract as a file: `schema.json` at the store root, written with the shipped defaults made explicit the first time the store persists anything. It is data rather than configuration, so it travels with the store, differs per project, and any other tool reading the store can enforce the same contract from the same file. The shipped defaults require nothing and mirror the advisory caps, so an untouched file changes no behavior; it only makes the contract visible and editable.
+
+Three fields can carry rules: `capsule` (the front matter line surfacing injects), `title` (the body's leading `#` heading; there is deliberately no separate title input, so the rule checks the one place a title can live), and `body`. Four rule keys: `required`, `min_chars`, `max_chars`, `hint`.
+
+Enforcement is asymmetric on purpose, and the asymmetry is measured: across five write-quality model captures in this project's lab, rules held at the tool boundary erred at zero while rules left to model judgment erred at about one percent. So the class of miss that matters is enforced rather than advised:
+
+- A rule marked `required` rejects the write that violates it, hint included, and nothing touches disk. A write is judged on what it changes, plus everything when the article is first created, so a capsule-only update is never held hostage to a legacy body.
+- Every other violation warns: the write lands and the message names what to fix.
+- A read never rejects, but it reports standing issues, because the agent holding a noncompliant article is the one positioned to heal it.
+- A malformed `schema.json` fails open and loud: rules stop being enforced and every write says so, because a contract the owner believes is enforced while a typo disabled it is the worst state.
+- A bound the schema declares owns its message: the built-in advisory line for the same aspect stays quiet instead of saying it twice.
+
+A store that requires every article to open with a heading:
+
+```json
+{
+  "schema_version": 1,
+  "article": {
+    "capsule": { "required": true, "max_chars": 1000, "hint": "One dense line of current truth." },
+    "title": { "required": true, "hint": "Start the body with a # heading naming the asset." }
+  }
+}
+```
+
+Delete a rule to drop it; delete the file to disable schema checks entirely. An edited file is never overwritten.
 
 ## Surfacing
 

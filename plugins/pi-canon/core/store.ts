@@ -6,6 +6,7 @@
 
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { ensureSchemaFile } from "./schema.ts";
 
 export interface Article {
   path: string;
@@ -235,7 +236,10 @@ export class CanonStore {
     return parts.sort().join("|");
   }
 
-  write(path: string, fields: { capsule?: string; body?: string; scope?: string }): Article {
+  /* The article this write would store, without storing it. Public so the tool can
+     hold a would-be article against the store's schema and reject before anything
+     touches disk; write() persists exactly what compose() returns. */
+  compose(path: string, fields: { capsule?: string; body?: string; scope?: string }): Article {
     path = contain(path);
     const prior = this.read(path);
     /* Agents sometimes paste a whole file as the body, front matter included; stored
@@ -246,7 +250,7 @@ export class CanonStore {
     if (block && block[1].split(/\r?\n/).every((line) => /^[\w-]+:\s|^\s*$/.test(line))) {
       body = body.slice(block[0].length).trimStart();
     }
-    const article: Article = {
+    return {
       path,
       capsule: (fields.capsule ?? prior?.capsule ?? "").replace(/\s*\n\s*/g, " ").trim(),
       updated: today(),
@@ -254,8 +258,13 @@ export class CanonStore {
       extra: prior?.extra ?? [],
       body,
     };
-    const file = this.fileFor(path);
+  }
+
+  write(path: string, fields: { capsule?: string; body?: string; scope?: string }): Article {
+    const article = this.compose(path, fields);
+    const file = this.fileFor(article.path);
     mkdirSync(dirname(file), { recursive: true });
+    ensureSchemaFile(this.root);
     writeFileSync(file, serialize(article));
     return article;
   }
@@ -272,6 +281,7 @@ export class CanonStore {
     const slug =
       (entry.slug ?? "entry").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "entry";
     mkdirSync(this.journalDir, { recursive: true });
+    ensureSchemaFile(this.root);
     /* An explicit instant, because the filename cannot carry one. Entries are named by
        date plus slug with -2, -3 for collisions, and sorting those lexicographically puts
        -10 before -2 and the unsuffixed name after every suffixed one, so "the newest

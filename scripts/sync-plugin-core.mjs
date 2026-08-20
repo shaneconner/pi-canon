@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const source = join(root, "extensions", "lib");
 const target = join(root, "plugins", "pi-canon", "core");
-const files = ["lint.ts", "retrieval.ts", "store.ts", "surfacing.ts", "tool.ts"];
+const files = ["lint.ts", "retrieval.ts", "schema.ts", "store.ts", "surfacing.ts", "tool.ts"];
 
 mkdirSync(target, { recursive: true });
 for (const file of files) copyFileSync(join(source, file), join(target, file));

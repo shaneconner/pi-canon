@@ -18,6 +18,8 @@ const { changesAssets, Surfacer } = await jiti.import(join(projectRoot, "extensi
 const { buildRetriever, governsAnAsset, intentQuery, LexicalRetriever, residue, RULE_SCOPE, userIntent } =
   await jiti.import(join(projectRoot, "extensions/lib/retrieval.ts"));
 const { registerPiCanon } = await jiti.import(join(projectRoot, "extensions/canon.ts"));
+const { checkArticle, loadSchema, titleOf, READ_ONLY, SCHEMA_FILE } =
+  await jiti.import(join(projectRoot, "extensions/lib/schema.ts"));
 
 let gates = 0;
 const pass = (name) => console.log(`ok ${String(++gates).padStart(2)} ${name}`);
@@ -2098,5 +2100,161 @@ assert.deepEqual(runClaudeReadBatch({
 }), {}, "a full article read in the same batch makes its capsule redundant");
 pass("the Claude hook emits one deduplicated current-cycle packet per tool batch");
 
+
+/* --- the article schema is a data contract ----------------------------------------
+
+   The W1 write-quality experiments measured the asymmetry this section enforces:
+   rules held at the tool boundary erred at zero across five model captures, rules
+   left to model judgment erred at about one percent. So format conformance lives in
+   the write path: a required rule rejects the write that violates it, everything
+   else warns, and a read reports standing issues so the agent holding the article
+   can heal it. The schema is a file in the store, not code, so other tools can
+   enforce the same contract. */
+
+const schemaProj = join(work, "schemaproj");
+mkdirSync(schemaProj, { recursive: true });
+const schemaRoot = join(schemaProj, ".canon");
+const schemaTools = [];
+registerPiCanon({ on() {}, registerTool: (t) => schemaTools.push(t), registerCommand() {} }, {});
+const schemaCtx = { cwd: schemaProj, ui: { notify() {} } };
+const canon = async (params) =>
+  (await schemaTools[0].execute("id", params, undefined, undefined, schemaCtx)).content[0].text;
+
+const firstWrite = await canon({
+  action: "write", path: "src/thing", capsule: "A capsule.", body: "# Thing\nCurrent truth.",
+});
+assert.match(firstWrite, /Wrote src\/thing\./);
+const schemaFile = join(schemaRoot, SCHEMA_FILE);
+assert.ok(existsSync(schemaFile));
+const shipped = JSON.parse(readFileSync(schemaFile, "utf8"));
+assert.equal(shipped.schema_version, 1);
+assert.equal(shipped.article.capsule.required, false);
+assert.equal(shipped.article.capsule.max_chars, CAPSULE_CHARS);
+assert.equal(shipped.article.title.required, false);
+assert.equal(shipped.article.body.max_chars, BODY_LARGE_CHARS);
+pass("the first persist writes schema.json with the shipped defaults made explicit");
+
+writeFileSync(schemaFile, JSON.stringify({
+  schema_version: 1,
+  article: { title: { required: true, hint: "Start the body with a # heading." } },
+}, null, 2));
+await canon({ action: "write", path: "src/thing", capsule: "Edited survives." });
+assert.match(readFileSync(schemaFile, "utf8"), /Start the body with a # heading/);
+pass("an edited schema.json is never overwritten by later persists");
+
+const rejected = await canon({ action: "write", path: "src/untitled", body: "No heading here." });
+assert.match(rejected, /Write rejected by this store's schema\.json:/);
+assert.match(rejected, /title: required and the body has no leading # heading\. Start the body with a # heading\./);
+assert.match(rejected, /Nothing was written/);
+assert.equal(new CanonStore(schemaRoot).read("src/untitled"), undefined);
+pass("a required rule rejects the violating write before anything touches disk, hint included");
+
+const accepted = await canon({ action: "write", path: "src/untitled", capsule: "Now titled.", body: "# Untitled Thing\nBody." });
+assert.match(accepted, /Wrote src\/untitled\./);
+assert.doesNotMatch(accepted, /rejected/);
+pass("the corrected write with a leading # heading lands");
+
+/* A legacy article that predates the rule: updates that do not touch the offending
+   carrier proceed with a warning, and a read reports without ever rejecting. */
+writeFileSync(schemaFile, JSON.stringify({ schema_version: 1, article: {} }, null, 2));
+await canon({ action: "write", path: "src/legacy", capsule: "Old.", body: "Headless body." });
+writeFileSync(schemaFile, JSON.stringify({
+  schema_version: 1,
+  article: { title: { required: true, hint: "Add a # heading." }, capsule: { min_chars: 10 } },
+}, null, 2));
+const untouchedCarrier = await canon({ action: "write", path: "src/legacy", capsule: "Still old but longer." });
+assert.match(untouchedCarrier, /Wrote src\/legacy\./);
+assert.match(untouchedCarrier, /schema: title: required and the body has no leading # heading\. Add a # heading\./);
+const bodyBearing = await canon({ action: "write", path: "src/legacy", body: "Still headless." });
+assert.match(bodyBearing, /Write rejected/);
+const readBack = await canon({ action: "read", path: "src/legacy" });
+assert.match(readBack, /Headless body\./);
+assert.match(readBack, new RegExp(`schema \\(${SCHEMA_FILE}\\): title: required`));
+assert.match(readBack, /can be healed with a write/);
+pass("a standing violation warns on untouched-carrier writes and on reads, and rejects only the write that touches it");
+
+const shortCapsule = await canon({ action: "write", path: "src/legacy", capsule: "tiny" });
+assert.match(shortCapsule, /Wrote src\/legacy\./);
+assert.match(shortCapsule, /schema: capsule: 4 chars \(min 10\)\./);
+pass("a bounds rule warns and the write still lands");
+
+/* Creation is judged whole: a new article must satisfy every required rule, touched
+   or not, because there is no legacy state to grandfather. */
+writeFileSync(schemaFile, JSON.stringify({
+  schema_version: 1,
+  article: { capsule: { required: true, hint: "One dense line." } },
+}, null, 2));
+const born = await canon({ action: "write", path: "src/newborn", body: "# Newborn\nBody only." });
+assert.match(born, /Write rejected/);
+assert.match(born, /capsule: required and empty\. One dense line\./);
+pass("creation is judged on every required rule, not only the fields the call supplied");
+
+/* A malformed schema fails open and loud: rules stop, the writer is told, nothing
+   bricks the store. */
+writeFileSync(schemaFile, "{ not json");
+const openFail = await canon({ action: "write", path: "src/newborn", body: "# Newborn\nBody only.", capsule: "c" });
+assert.match(openFail, /Wrote src\/newborn\./);
+assert.match(openFail, /schema\.json is not valid JSON .*not being enforced/);
+pass("a malformed schema.json fails open with the problem named, never a bricked store");
+
+writeFileSync(schemaFile, JSON.stringify({
+  schema_version: 1,
+  article: { caps: { required: true }, title: { required: true, max_length: 5 } },
+}, null, 2));
+const typod = await canon({ action: "write", path: "src/typod", capsule: "c", body: "No heading." });
+assert.match(typod, /Write rejected/);
+const typodOk = await canon({ action: "write", path: "src/typod", capsule: "c", body: "# Typod\nBody." });
+assert.match(typodOk, /unknown article field "caps"/);
+assert.match(typodOk, /unknown rule key "title\.max_length"/);
+pass("schema typos are named while the rules that parsed still enforce");
+
+/* Declared aspects own their message: the built-in advisory for the same aspect
+   stays quiet instead of saying it twice. */
+writeFileSync(schemaFile, JSON.stringify({
+  schema_version: 1,
+  article: { capsule: { max_chars: 1000, hint: "One dense line, not a second body." } },
+}, null, 2));
+const doubled = await canon({ action: "write", path: "src/typod", capsule: "y".repeat(1050) });
+assert.match(doubled, /schema: capsule: 1050 chars \(max 1000\)\. One dense line/);
+assert.equal(doubled.match(/1050 chars/g).length, 1);
+pass("a schema-declared bound owns its warning; the built-in line for the same aspect stays quiet");
+
+assert.equal(titleOf("# Alpha\nBody"), "Alpha");
+assert.equal(titleOf("\n\n#  Spaced Heading \nBody"), "Spaced Heading");
+assert.equal(titleOf("## Sub only\nBody"), undefined);
+assert.equal(titleOf("plain text"), undefined);
+const readVerdict = checkArticle(
+  { path: "p", capsule: "", updated: "", scope: "", extra: [], body: "no heading" },
+  { title: { required: true }, capsule: { required: true } },
+  READ_ONLY,
+);
+assert.equal(readVerdict.rejections.length, 0);
+assert.equal(readVerdict.warnings.length, 2);
+const absentLoad = loadSchema(join(work, "nowhere"));
+assert.equal(absentLoad.schema, undefined);
+assert.deepEqual(absentLoad.problems, []);
+pass("titleOf reads only a leading # heading; read-only checks never reject; an absent schema is silence");
+
+/* A write that changes nothing is a restatement, not a change. The W1j capture
+   measured this as the one store corruption no content rule can catch, because no
+   field differs; the only casualty was the freshness stamp, which then lied about
+   when the content last changed. Equality is checked mechanically in the write
+   path: the file is untouched, `updated` keeps its date, and the agent is told the
+   article is already current. A write that changes any owned field still lands. */
+writeFileSync(schemaFile, JSON.stringify({ schema_version: 1, article: {} }, null, 2));
+await canon({ action: "write", path: "src/steady", capsule: "Steady truth.", body: "# Steady\nBody line." });
+const steadyFile = join(schemaRoot, "articles", "src", "steady.md");
+const steadyBytes = readFileSync(steadyFile, "utf8");
+const restated = await canon({ action: "write", path: "src/steady", capsule: "Steady truth.", body: "# Steady\nBody line." });
+assert.match(restated, /already current/);
+assert.doesNotMatch(restated, /Wrote/);
+assert.equal(readFileSync(steadyFile, "utf8"), steadyBytes);
+const fieldless = await canon({ action: "write", path: "src/steady" });
+assert.match(fieldless, /already current/);
+assert.equal(readFileSync(steadyFile, "utf8"), steadyBytes);
+const changedCapsule = await canon({ action: "write", path: "src/steady", capsule: "New truth." });
+assert.match(changedCapsule, /Wrote src\/steady\./);
+assert.notEqual(readFileSync(steadyFile, "utf8"), steadyBytes);
+pass("an identical write reports already current and leaves the file untouched; a real change still lands");
 
 console.log(`\nall ${gates} gates green`);

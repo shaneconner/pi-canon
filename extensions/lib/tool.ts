@@ -4,6 +4,7 @@
 import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
 import { advise, unretained } from "./lint.ts";
+import { checkArticle, loadSchema, READ_ONLY, SCHEMA_FILE } from "./schema.ts";
 import { contained, normalize, type CanonStore } from "./store.ts";
 import { type Candidate, LexicalRetriever, RULE_SCOPE } from "./retrieval.ts";
 import type { Mount, Surfacer } from "./surfacing.ts";
@@ -253,7 +254,16 @@ export function runCanon(runtime: CanonRuntime, params: Record<string, unknown>)
       const index = recent.length
         ? `\n\njournal: ${recent.join(", ")}${earlier ? ` and ${earlier} earlier` : ""}`
         : "";
-      return `${title}\n${head}\n\n${article.body}`.trim() + index;
+      /* Reads never reject, but they do report: an agent holding a noncompliant
+         article is the one agent positioned to heal it, and silence here is how a
+         store drifts out of its own contract one read at a time. */
+      const { schema, problems } = loadSchema(store.root);
+      const standing = schema ? checkArticle(article, schema, READ_ONLY) : { rejections: [], warnings: [] };
+      const issues = [...standing.warnings, ...problems];
+      const report = issues.length
+        ? `\n\nschema (${SCHEMA_FILE}): ${issues.join(" ")} This article can be healed with a write.`
+        : "";
+      return `${title}\n${head}\n\n${article.body}`.trim() + index + report;
     }
     case "write": {
       if (!path) return "write needs a path.";
@@ -266,7 +276,7 @@ export function runCanon(runtime: CanonRuntime, params: Record<string, unknown>)
          prior state; which fields this call happened to set is a separate question and is
          answered separately below. */
       const prior = store.read(path);
-      const article = store.write(path, {
+      const fields = {
         capsule: params.capsule ? String(params.capsule) : undefined,
         body: params.body ? String(params.body) : undefined,
         /* "asset" is the way back. The enum is the only vocabulary the model has, so
@@ -274,7 +284,50 @@ export function runCanon(runtime: CanonRuntime, params: Record<string, unknown>)
            one: every other input falls through to undefined, which means untouched. It
            stores empty, which is the default state, the address being the claim. */
         scope: params.scope === "asset" ? "" : params.scope ? String(params.scope) : undefined,
-      });
+      };
+      /* The store's declared contract, held against the article this write WOULD
+         store, before anything touches disk. Only a required rule the write itself
+         touched (or a brand new article) rejects; everything else warns, so the write
+         still lands and the agent still learns. */
+      const { schema, problems } = loadSchema(store.root);
+      const composed = store.compose(path, fields);
+      const verdict = schema
+        ? checkArticle(composed, schema, {
+            capsule: fields.capsule !== undefined,
+            body: fields.body !== undefined,
+            created: !prior,
+          })
+        : { rejections: [], warnings: [] };
+      if (verdict.rejections.length) {
+        return [
+          `Write rejected by this store's ${SCHEMA_FILE}:`,
+          ...verdict.rejections.map((line) => `- ${line}`),
+          "Nothing was written. Fix the listed fields and write again.",
+        ].join("\n");
+      }
+      /* A write that changes nothing is a restatement, not a change. Measured (W1j):
+         restating the current state through the write path was the one store
+         corruption no content rule could catch, because no field differs; the only
+         thing it changed was the freshness stamp, which then lied. So equality is
+         checked here, mechanically, and `updated` keeps meaning what it says. */
+      if (
+        prior &&
+        composed.capsule === prior.capsule &&
+        composed.scope === prior.scope &&
+        composed.body.trimEnd() === prior.body.trimEnd()
+      ) {
+        surfacer.markUpdated(
+          qualify(composed.path),
+          [params.capsule, params.body].filter(Boolean).map(String).join("\n"),
+        );
+        return [
+          `${qualify(composed.path)} is already current: this write matches the stored article, ` +
+            `so nothing was rewritten and updated stays ${prior.updated}.`,
+          ...verdict.warnings.map((line) => `schema: ${line}`),
+          ...problems,
+        ].join("\n");
+      }
+      const article = store.write(path, fields);
       /* What this write put in the window, which is what the agent supplied, not the
          merged article: a capsule-only write does not deliver the stored body. */
       surfacer.markUpdated(
@@ -283,7 +336,9 @@ export function runCanon(runtime: CanonRuntime, params: Record<string, unknown>)
       );
       return [
         `Wrote ${qualify(article.path)}.`,
-        ...advise(article, store, prior?.body, { dir: mount.dir, retrieval: runtime.retrieval }),
+        ...verdict.warnings.map((line) => `schema: ${line}`),
+        ...problems,
+        ...advise(article, store, prior?.body, { dir: mount.dir, retrieval: runtime.retrieval }, schema),
       ].join("\n");
     }
     case "journal": {

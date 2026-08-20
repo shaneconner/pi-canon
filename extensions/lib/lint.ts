@@ -2,6 +2,7 @@
    to stop writing; a warning teaches it what to do next. */
 
 import { governsAnAsset, RULE_SCOPE } from "./retrieval.ts";
+import type { CanonSchema } from "./schema.ts";
 import { normalize, type Article, type CanonStore } from "./store.ts";
 
 export const BODY_WARN_CHARS = 8000;
@@ -93,9 +94,19 @@ export function advise(
   store: CanonStore,
   priorBody?: string,
   reach?: Reach,
+  schema?: CanonSchema,
 ): string[] {
   const advice: string[] = [];
   const size = article.body.length;
+  /* A schema-declared aspect owns its message: when the store's schema.json bounds a
+     field, the schema check reports the violation with the owner's own hint, and the
+     built-in line for the same aspect stays quiet instead of saying it twice. */
+  const declared = {
+    capsuleRequired: schema?.capsule?.required === true,
+    capsuleMax: schema?.capsule?.max_chars !== undefined,
+    bodyMax: schema?.body?.max_chars !== undefined,
+    bodyMin: schema?.body?.min_chars !== undefined,
+  };
 
   /* The laundering guard: an agent that just violated a documented constraint will
      faithfully update the article to describe the violation as current truth. Name
@@ -161,15 +172,15 @@ export function advise(
     );
   }
 
-  if (size > BODY_LARGE_CHARS) {
+  if (size > BODY_LARGE_CHARS && !declared.bodyMax) {
     advice.push(
       `Body is ${size} chars (large past ${BODY_LARGE_CHARS}). Go hierarchical: keep this article ` +
         `as the summary and router, and move detail into children under ${article.path}/ at chunks ` +
         `worth loading separately.`,
     );
-  } else if (size > BODY_WARN_CHARS) {
+  } else if (size > BODY_WARN_CHARS && size <= BODY_LARGE_CHARS) {
     advice.push(`Body is ${size} chars (warn past ${BODY_WARN_CHARS}). Densify before it needs splitting.`);
-  } else if (size > 0 && size < BODY_TINY_CHARS) {
+  } else if (size > 0 && size < BODY_TINY_CHARS && !declared.bodyMin) {
     const parent = parentOf(article.path);
     if (parent && store.read(parent)) {
       advice.push(`Body is ${size} chars. Consider folding it into ${parent}; keep children only at real asset or chunk boundaries.`);
@@ -177,8 +188,10 @@ export function advise(
   }
 
   if (!article.capsule) {
-    advice.push("No capsule. Add one dense line of front matter; surfacing has nothing to inject without it.");
-  } else if (article.capsule.length > CAPSULE_CHARS) {
+    if (!declared.capsuleRequired) {
+      advice.push("No capsule. Add one dense line of front matter; surfacing has nothing to inject without it.");
+    }
+  } else if (article.capsule.length > CAPSULE_CHARS && !declared.capsuleMax) {
     advice.push(
       `Capsule is ${article.capsule.length} chars (cap ${CAPSULE_CHARS}). A capsule is one dense line, not a second body.`,
     );
