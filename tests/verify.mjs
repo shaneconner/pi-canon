@@ -2281,4 +2281,30 @@ const declaredRule = await canon({ action: "write", path: "pkg/review-rule", sco
 assert.doesNotMatch(declaredRule, /No asset on disk/);
 pass("an orphaned article warns on read and write; conceptual, root-level, and declared-rule addresses stay silent");
 
+/* Search guarantees articles half the window. R1 (2026-08-20, 504 known-item
+   queries on the two largest real stores) measured journal entries about an event
+   crowding out the article carrying its current truth: one combined top-10 cost 8
+   to 20 points of governing-article recall. The split is mechanical: articles get
+   up to five slots, journal the rest, and a short side cedes its slots. */
+await canon({ action: "write", path: "svc/flux", capsule: "Owns the fluxcap budget.", body: "# Flux\nThe fluxcap lives here." });
+for (let n = 0; n < 12; n += 1) {
+  await canon({ action: "journal", body: `fluxcap fluxcap fluxcap event ${n} touched the fluxcap again.`, slug: `flux-${n}`, subject: ["svc/flux"] });
+}
+const crowded = await canon({ action: "search", query: "fluxcap" });
+assert.match(crowded, /svc\/flux: Owns the fluxcap budget\./);
+assert.match(crowded, /more matched; narrow the query/);
+for (let n = 0; n < 7; n += 1) {
+  await canon({ action: "write", path: `svc/flux${n}`, capsule: `fluxcap sibling ${n}.`, body: `# Flux ${n}\nMore fluxcap facts.` });
+}
+const split = await canon({ action: "search", query: "fluxcap" });
+const splitLines = split.split("\n").filter((l) => !l.startsWith("..."));
+assert.equal(splitLines.filter((l) => l.startsWith("journal ")).length, 5);
+assert.equal(splitLines.filter((l) => l.startsWith("svc/flux")).length, 5);
+for (let n = 0; n < 7; n += 1) {
+  await canon({ action: "write", path: `svc/steady${n}`, capsule: `steadyterm holder ${n}.`, body: `# Steady ${n}\nsteadyterm facts.` });
+}
+const spill = await canon({ action: "search", query: "steadyterm" });
+assert.equal(spill.split("\n").filter((l) => l.startsWith("svc/steady")).length, 7);
+pass("search splits the window five and five when both sides are rich, and a short side cedes its slots");
+
 console.log(`\nall ${gates} gates green`);

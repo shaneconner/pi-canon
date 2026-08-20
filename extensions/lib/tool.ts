@@ -157,8 +157,18 @@ function filingTail(retrieval: string): string {
    named. Neither is decoration.
 
    Ranking reuses LexicalRetriever rather than growing a second notion of relevance, so search
-   and recommendation cannot drift apart. */
+   and recommendation cannot drift apart.
+
+   Articles are guaranteed half the window. Measured on the two largest real stores
+   (R1, 2026-08-20, 504 known-item queries mined from journal subjects): in one
+   combined ranking, journal entries about an event crowd out the article that
+   carries its current truth, costing 8 to 20 points of governing-article recall at
+   realistic query lengths, because an event and its article share vocabulary and
+   the journal says it more often. So the ranking is one pass but the window is
+   split: articles fill up to half, journal entries the rest, and whichever side
+   runs short cedes its slots to the other. Current truth first, history behind it. */
 const SEARCH_RESULTS = 10;
+const ARTICLE_SLOTS = 5;
 
 function search(store: CanonStore, query: string): string {
   if (!query.trim()) return "search needs a query.";
@@ -199,7 +209,16 @@ function search(store: CanonStore, query: string): string {
   const ranked = [...scored.entries()].sort((a, b) => b[1] - a[1]);
   if (!ranked.length) return `Nothing matches "${query}".`;
 
-  const lines = ranked.slice(0, SEARCH_RESULTS).map(([key]) => {
+  const articleRanked = ranked.filter(([key]) => !byKey.has(key));
+  const journalRanked = ranked.filter(([key]) => byKey.has(key));
+  const articleQuota = Math.min(
+    articleRanked.length,
+    Math.max(ARTICLE_SLOTS, SEARCH_RESULTS - journalRanked.length),
+  );
+  const journalQuota = Math.min(journalRanked.length, SEARCH_RESULTS - articleQuota);
+  const chosen = [...articleRanked.slice(0, articleQuota), ...journalRanked.slice(0, journalQuota)];
+
+  const lines = chosen.map(([key]) => {
     const entry = byKey.get(key);
     if (entry) {
       const subjects = entry.subjects.length ? ` (${entry.subjects.join(", ")})` : "";
@@ -209,8 +228,8 @@ function search(store: CanonStore, query: string): string {
     return `${key}: ${article?.capsule || excerpt(article?.body ?? "")}`;
   });
   /* Say what was dropped. A silent cap reads as "that is everything". */
-  if (ranked.length > SEARCH_RESULTS) {
-    lines.push(`... ${ranked.length - SEARCH_RESULTS} more matched; narrow the query to see them.`);
+  if (ranked.length > chosen.length) {
+    lines.push(`... ${ranked.length - chosen.length} more matched; narrow the query to see them.`);
   }
   return lines.join("\n");
 }
