@@ -155,7 +155,7 @@ Entries logged with `subject` addresses come back as a one-line index of filenam
 
 Lint on a write is advisory strings appended to the response, never a refusal, because a blocked write teaches an agent to stop writing while a warning teaches it what to do next. The one exception is a rule the store itself declared `required` in its schema, documented in [The article schema](#the-article-schema) below. It warns past 8,000 characters of body and suggests going hierarchical past 20,000. It names a missing capsule, one over 1,000 characters, or one written as a change log. An address carrying a `log`, `journal`, `session`, `standup` or `meeting` segment, or an ISO date, draws a redirect to the journal. Dead wikilinks are named one line each. An article whose asset went missing is named on read and on write: a nested address whose parent directory exists on disk while nothing matches the asset draws the orphan question, with the ways out spelled (move the article, fold it into the parent, or declare `scope: rule`). Root-level addresses, declared rules, and stores whose addresses never mapped to files stay silent.
 
-A rewrite that grows the body says so in its own result: `Body grew 812 -> 1304 bytes.`, followed by the reminder that an article carries current state and narrated history (old values, transitions) belongs in the journal. Any growth fires; creation is not growth, and a capsule-only write never grows the stored body. This line is measured, not guessed: in a two-arm run over identical eight-session lineages, writers whose tool spoke it left half as many superseded values standing in articles (51 against 88 of 96) and stores a fifth smaller, at no cost to later readers, where the same guidance in the system prompt had moved nothing.
+A rewrite that grows the body says so in its own result: `Body grew 812 -> 1304 bytes.`, followed by the reminder that an article carries current state and narrated history (old values, transitions) belongs in the journal. Any growth fires; creation is not growth, and a capsule-only write never grows the stored body. This line is measured, not guessed: in two-arm runs over byte-identical eight-session lineages, writers whose tool spoke it left close to half the superseded values standing that the shipped tool did, 51 against 88 of 96 on one model and 45 against 87 on a second, and no reader answered worse. Store size is the part that did not carry. It fell a fifth on the first model and barely moved on the second, and across the eight paired lineages the direction of that size change is not distinguishable from chance. The same doctrine in a system prompt cleared one superseded value in thirty-two, though that arm ran in a separate one-session study and the two were never placed side by side.
 
 One lint line is different in kind. When a write supplies a body and an article was already there, the new body is compared against the prior one, and a line that carried constraint language and disappeared is quoted back at the write that removed it. The vocabulary is fixed: `must`, `never`, `always`, `require` in its `requires` and `required` forms, `do not`, and `don't`. At most two lines are named per write, each cut to its first 160 characters, with the note that if the constraint still holds it should stay, and if it genuinely changed, the change belongs in the journal. The quote is a prefix rather than a summary. It is an advisory: the write already landed, and nothing can make an agent put the line back.
 
@@ -303,22 +303,26 @@ captured, or captured and later overwritten) and none at retrieval. The
 write-side programme that followed is in
 [write-desk/](https://github.com/shaneconner/canon-bench/tree/main/write-desk),
 and it is where the growth line documented above comes from: two arms over
-identical eight-session histories, where a tool that names article growth left
-half as many superseded values standing in articles as the shipped tool did.
+byte-identical eight-session histories, where a tool that names article growth
+left close to half the superseded values standing that the shipped tool did, on
+each of two models.
 
-Papers: "Mutable Canonical Memory over an Immutable Journal, with Recall by
-Surfacing" ([doi:10.5281/zenodo.21890647](https://doi.org/10.5281/zenodo.21890647))
-and "Pricing Recall in Long-Term Memory for AI Agents"
-([doi:10.5281/zenodo.21960351](https://doi.org/10.5281/zenodo.21960351)).
+## Papers
+
+Each carries its per-cell artifact trail on Zenodo. Every DOI below is a concept
+DOI, so it resolves to the newest version of that paper rather than to one frozen
+deposit.
+
+- **Mutable Canonical Memory over an Immutable Journal, with Recall by Surfacing**, [doi:10.5281/zenodo.21890647](https://doi.org/10.5281/zenodo.21890647). The first campaign, and the one that asks whether the design holds up at all: one governing article per asset, an append-only journal beneath it, and recall that arrives on a touch, measured against a no-extension floor that received the prior transcripts and is on record reading them.
+- **Pricing Recall in Long-Term Memory for AI Agents**, [doi:10.5281/zenodo.21960350](https://doi.org/10.5281/zenodo.21960350). Six studies on what recall costs and which parts of it earn their keep. It priced the orientation line and the tool schema (both negative, both deleted), set the `standout` cutoff at a measured operating point, and found the store size past which recall that waits to be asked stops working.
 
 ## More
 
-- The 0.2 paper, with its six-study per-cell artifact trail: [doi:10.5281/zenodo.21960350](https://doi.org/10.5281/zenodo.21960350).
-- The first paper, with its end-to-end per-cell artifact trail: [doi:10.5281/zenodo.21890647](https://doi.org/10.5281/zenodo.21890647).
-- The benchmark, drivers, frozen protocol, and the verifier that recomputes the paper's quantitative claims from the artifacts: [canon-bench](https://github.com/shaneconner/canon-bench).
+- The benchmark, drivers, frozen protocol, and the verifier that recomputes each paper's quantitative claims from the artifacts: [canon-bench](https://github.com/shaneconner/canon-bench).
+- [canon-atlas](https://github.com/shaneconner/canon-atlas), a viewer for a store like this one: the article graph, what each node points at, and what points back. It was built with pi-canon in mind and kept package-agnostic, so it reads any directory of structured Markdown serving as memory. It also enforces the two graph-wide `relations` rules this package parses but cannot see on its own, `orphan.warn` and `children.listed`.
 - Interactive versions of the figures and the full measurement story, Part 1 and Part 2: [shaneconner.com/projects/pi-canon](https://shaneconner.com/projects/pi-canon/).
 - The first campaign's narrative version: [My agents' wiki was written faster than it was read](https://medium.com/@shane.conner/my-agents-wiki-was-written-faster-than-it-was-read-and-what-was-read-sold-me-back-debt-i-had-a8085319c68b).
 - The second campaign's, on pricing recall: [Pricing recall in long-term memory for AI agents](https://medium.com/@shane.conner/pricing-recall-in-long-term-memory-for-ai-agents-7d73f6418c17).
 - [pi-fold](https://github.com/shaneconner/pi-fold), a separate optional package serving the working tier. pi-canon ships the two persistent tiers of the same four-tier stack: the journal is the episodic tier, the canon the semantic tier. The two compose, neither requires the other, and neither knows what the other has spent.
 
-MIT. In a clone of this repo, `node tests/verify.mjs` runs the gate suite: every invariant prints by name and the run must end `all N gates green`, 149 of them at this release.
+MIT. In a clone of this repo, `node tests/verify.mjs` runs the gate suite: every invariant prints by name and the run must end `all N gates green`, 174 of them at this release.
