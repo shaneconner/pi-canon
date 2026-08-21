@@ -185,6 +185,19 @@ A store that requires every article to open with a heading:
 
 Delete a rule to drop it; delete the file to disable schema checks entirely. An edited file is never overwritten.
 
+Relations rules live in the same file under `relations`, because the reference graph is part of the contract too; each tool enforces the rules it can see, so one file governs every tool that reads the store. This package sees an article's own citations at the write boundary and enforces `refs`: `required` rejects a write whose body cites nothing, judged like the field rules (the write that changed the reference set, or a creation), and `min_count` warns under a floor, with code-fenced examples and case-folded duplicates never counted. The two graph-wide rules parse here and are enforced by graph-reading tools such as [canon-atlas](https://github.com/shaneconner/canon-atlas): `orphan.warn` warns when no other article references this one, and `children.listed` warns when an article does not reference each direct child under its address.
+
+```json
+{
+  "schema_version": 1,
+  "relations": {
+    "refs": { "required": true, "hint": "Name what this concerns." },
+    "orphan": { "warn": true },
+    "children": { "listed": true }
+  }
+}
+```
+
 ## Surfacing
 
 A tool call stages the governing article for whatever it touched and sends nothing. Each turn end flushes everything staged as a single message, because pi's steering queue drains one message per provider round trip and a message per tool call would buy every nudge its own model call. An article with a presence mark surfaces at most once while that mark remains in the context the provider receives; one folded or compacted away returns to surfacing and rides again on its asset's next touch (the `resurface` option below). Delivered text shorter than 24 normalized characters cannot be tested safely and conservatively stays seen for the session. Nothing persists across sessions: a new session re-surfaces everything.

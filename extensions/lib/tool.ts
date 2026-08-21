@@ -4,7 +4,7 @@
 import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
 import { advise, orphaned, unretained } from "./lint.ts";
-import { checkArticle, loadSchema, READ_ONLY, SCHEMA_FILE } from "./schema.ts";
+import { checkArticle, loadSchema, outgoingOf, READ_ONLY, SCHEMA_FILE } from "./schema.ts";
 import { contained, normalize, type CanonStore } from "./store.ts";
 import { type Candidate, LexicalRetriever, RULE_SCOPE } from "./retrieval.ts";
 import type { Mount, Surfacer } from "./surfacing.ts";
@@ -329,6 +329,9 @@ export function runCanon(runtime: CanonRuntime, params: Record<string, unknown>)
         ? checkArticle(composed, schema, {
             capsule: fields.capsule !== undefined,
             body: fields.body !== undefined,
+            /* Touched means the reference SET changed, not that a body was sent: a
+               body edit that keeps its citations must not re-litigate them. */
+            refs: outgoingOf(prior ? prior.body : "").join("\n") !== outgoingOf(composed.body).join("\n"),
             created: !prior,
           })
         : { rejections: [], warnings: [] };

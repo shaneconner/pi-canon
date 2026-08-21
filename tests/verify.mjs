@@ -2138,6 +2138,9 @@ assert.equal(shipped.article.capsule.required, false);
 assert.equal(shipped.article.capsule.max_chars, CAPSULE_CHARS);
 assert.equal(shipped.article.title.required, false);
 assert.equal(shipped.article.body.max_chars, BODY_LARGE_CHARS);
+assert.equal(shipped.relations.refs.required, false);
+assert.equal(shipped.relations.orphan.warn, false);
+assert.equal(shipped.relations.children.listed, false);
 pass("the first persist writes schema.json with the shipped defaults made explicit");
 
 writeFileSync(schemaFile, JSON.stringify({
@@ -2240,6 +2243,55 @@ const absentLoad = loadSchema(join(work, "nowhere"));
 assert.equal(absentLoad.schema, undefined);
 assert.deepEqual(absentLoad.problems, []);
 pass("titleOf reads only a leading # heading; read-only checks never reject; an absent schema is silence");
+
+/* --- relations rules: the graph in the contract ------------------------------------
+
+   Relations live in the same file so every tool reads one contract, but each tool
+   enforces only what it can see. This boundary sees an article's own outgoing
+   [[references]], so refs holds here: required rejects only the write that changed
+   the reference set or created the article, min_count warns, and orphan / children
+   parse cleanly for the graph-reading tools that enforce them. */
+
+writeFileSync(schemaFile, JSON.stringify({
+  schema_version: 1,
+  relations: { refs: { required: true, hint: "Name what this concerns." } },
+}, null, 2));
+const unreferenced = await canon({ action: "write", path: "src/island", capsule: "c", body: "# Island\nCites nothing." });
+assert.match(unreferenced, /Write rejected by this store's schema\.json:/);
+assert.match(unreferenced, /refs: required and the body references nothing\. Name what this concerns\./);
+assert.equal(new CanonStore(schemaRoot).read("src/island"), undefined);
+const referenced = await canon({ action: "write", path: "src/island", capsule: "c", body: "# Island\nSee [[src/thing]]." });
+assert.match(referenced, /Wrote src\/island\./);
+pass("required refs rejects a creation that cites nothing; the corrected citation lands");
+
+/* A legacy article predating the rule: a body edit that keeps its (empty) reference
+   set is untouched and warns; only the edit that removes citations rejects. */
+const keptEmpty = await canon({ action: "write", path: "src/thing", body: "# Thing\nStill cites nothing, edited." });
+assert.match(keptEmpty, /Wrote src\/thing\./);
+assert.match(keptEmpty, /schema: refs: required and the body references nothing\./);
+const decited = await canon({ action: "write", path: "src/island", body: "# Island\nCitations deleted." });
+assert.match(decited, /Write rejected/);
+assert.match(decited, /refs: required/);
+pass("a kept reference set warns; the write that empties it rejects");
+
+writeFileSync(schemaFile, JSON.stringify({
+  schema_version: 1,
+  relations: { refs: { min_count: 2 } },
+}, null, 2));
+const under = await canon({ action: "write", path: "src/island", body: "# Island\nOnly [[src/thing]] and `[[not/a/ref]]` and\n```\n[[also/not]]\n```\nand [[SRC/THING|again]]." });
+assert.match(under, /Wrote src\/island\./);
+assert.match(under, /schema: refs: 1 outgoing \(min 2\)\./);
+pass("min_count warns, counting real citations once: code examples and case-folded duplicates do not count");
+
+writeFileSync(schemaFile, JSON.stringify({
+  schema_version: 1,
+  relations: { refs: { min: 1 }, parents: {}, orphan: { warn: true }, children: { listed: true } },
+}, null, 2));
+const relTypod = await canon({ action: "write", path: "src/island", capsule: "still here" });
+assert.match(relTypod, /unknown rule key "relations\.refs\.min"/);
+assert.match(relTypod, /unknown relations field "parents"/);
+assert.doesNotMatch(relTypod, /rejected/);
+pass("relations typos are named while orphan and children parse for the tools that enforce them");
 
 /* A write that changes nothing is a restatement, not a change. The W1j capture
    measured this as the one store corruption no content rule can catch, because no
