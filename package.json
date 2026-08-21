@@ -49,5 +49,8 @@
   "homepage": "https://github.com/shaneconner/pi-canon#readme",
   "devDependencies": {
     "jiti": "^2.7.0"
+  },
+  "dependencies": {
+    "@earendil-works/pi-tui": "^0.84.2"
   }
 }

@@ -227,6 +227,8 @@ export default function (pi) {
 
 Six keys, and any other throws at registration by name, because everything else is a constant on purpose.
 
+The four behavior keys (`surface`, `resurface`, `retrieval`, `standout`) can also come from `~/.config/pi-canon/settings.json`, which the `/canon-settings` command edits from inside the TUI: booleans and retrieval cycle, the standout cutoff steps along its lattice with left/right and takes an exact value on Enter, and every applied change saves immediately through the same validation registration uses. Explicit options win over the file. `root` and `mounts` are per-project topology and stay code-only; they have no row in the editor and no place in the file.
+
 - **`root`** places the store. Absolute is used as given, relative joins the project cwd. Default `<project>/.canon`.
 - **`surface: false`** silences the per-turn flush and the settle reminder. The `pi_canon` tool and `/pi-canon` stay registered and working.
 - **`resurface: false`** returns an article to surfacing at most once per session however long ago it left the window. The default is `true`: an article with a presence mark counts as seen only while that mark remains in the context the provider receives, so one folded or compacted away surfaces again the next time its asset is touched. Text shorter than 24 normalized characters has no safe mark and conservatively retains the once-per-session behavior. A fresh touch is what brings a marked article back, so nothing re-surfaces on its own.
@@ -281,46 +283,33 @@ What the package does not do, stated so nothing above reads as more than it is:
 
 ## Evidence
 
-The population comes before the numbers: five author-built chains, development-exposed and reused by the confirmatory run, four eligible trap designs, each repeated five times, one worker model, under a protocol frozen with a hash manifest before that run.
+This package is measured rather than asserted, and the measurements live in
+their own repository: [canon-bench](https://github.com/shaneconner/canon-bench),
+the benchmark and evidence repo for this line of work.
 
-The unit is a cell: a fresh worktree holding a small fictional repository, run through four sessions that share it. A plant session does ordinary work whose natural course surfaces a constraint, never phrased as an instruction to remember. A distractor session comes in between. A probe session then gets a task whose obvious solution violates that constraint in a way that compiles, runs, and fails a grader the agent never sees. A recall session answers an auditor afterwards, one judge call per fact.
+The headline study runs five multi-session chains in a shared worktree, each
+planting a constraint in one session and probing it in a later one, and scores
+whether the agent still honors it. Against a no-extension floor that gets the
+prior transcripts and is on record reading them, this package avoided 19 of 20
+trap cells to the floor's 8, and answered recall audits at about a third of the
+floor's median token cost. Recall accuracy itself was a wash across arms, and a
+static doctrine file was cheaper on both metered measures while passing three
+fewer trap cells. Full tables, the arms, and the limitations are in
+[RESULTS.md](https://github.com/shaneconner/canon-bench/blob/main/RESULTS.md).
 
-Four arms run every cell. `canon` is stock Pi plus this package at 0.1.0, the build the study measured. `canondoc` is canon plus a static doctrine file beside it. `agents.md` is a self-maintained convention file preloaded with 99 lines of mature-project noise. `bare` loads no memory extension, and it is a stronger floor than the name suggests: prior-session transcripts land in its worktree before the recall session and its agent is on record reading them, so it is a no-extension floor at probe time and a transcript baseline at recall.
+That study's forensic pass is what set the current research direction: of
+fourteen recall misses, thirteen first went wrong at the write desk (never
+captured, or captured and later overwritten) and none at retrieval. The
+write-side programme that followed is in
+[write-desk/](https://github.com/shaneconner/canon-bench/tree/main/write-desk),
+and it is where the growth line documented above comes from: two arms over
+identical eight-session histories, where a tool that names article growth left
+half as many superseded values standing in articles as the shipped tool did.
 
-| arm | trap cells (of 20) | all checks (of 110) | plant-only recall (of 45) | median recall tokens | total chain cost |
-|---|---|---|---|---|---|
-| canon | 19 | 109 | 41 | 20,775 | $0.5454 |
-| agents.md | 18 | 107 | 42 | 64,568 | $0.6227 |
-| canondoc | 16 | 105 | 40 | 13,991 | $0.4639 |
-| bare | 8 | 85 | 40 | 61,006 | $0.5345 |
-
-![Every eligible probe cell as a square, four trap designs by five repetitions, per arm](https://raw.githubusercontent.com/shaneconner/pi-canon/main/docs/assets/fig-trap.png)
-
-*One square per eligible probe cell: four trap designs across, five repetitions within each, one row per arm. Every consumer-contract cell is a loss for bare. canon loses one cell in the whole grid, chain 04 repetition 1, which is the design that costs every arm at least one.*
-
-Read the unconditioned column beside the headline one. The trap metric is conditioned on the floor arm's cold failures, which is the strongest objection to it, so the unconditioned count scores all 110 intended checks whether or not a cold worker had already failed them, and the ordering survives. That count is check-level rather than an unconditioned version of the cell metric, and it was computed after the run rather than frozen with the protocol. Read the 18 before the 8: a self-maintained convention file, deliberately burdened with 99 lines of noise, finished one repeated cell behind the package, and quoting the gap against the floor without that number would be managing the reader rather than informing them.
-
-Recall is a wash and has to be reported as one. Plant-only recall, 45 judged facts per arm: agents.md 42, canon 41, canondoc 40, bare 40. One fact flagged as paraphrase-sensitive before the freeze carries 9 of the 17 misses across arms, and striking it leaves canon level with bare. An ordering that moves when one judged item is removed is not an ordering.
-
-Where the arms separate is the price of the answer. Median recall session tokens ran canondoc 13,991, canon 20,775, bare 61,006, agents.md 64,568, so canon answers at 0.34x bare's median. That does not make it the cheapest arm end to end. Total chain cost ran canondoc $0.4639, bare $0.5345, canon $0.5454, agents.md $0.6227, so canon is not the cheapest arm overall, and canondoc is lowest on both metered measures while passing three fewer trap cells. Every dollar figure is metered worker-session cost at that day's rates; the judge calls sit outside all of them, in equal number per arm. A package-level study offers no account of why.
-
-The result that changed the roadmap is not in that run at all. A forensic pass over a development run classified 14 recall misses by where each first went wrong.
-
-![Fourteen misses classified by first failure point, thirteen of them at the write desk](https://raw.githubusercontent.com/shaneconner/pi-canon/main/docs/assets/fig-writedesk.png)
-
-*The 14 recall misses from a development run, each placed at the point it first went wrong: 8 never captured into any tier, 5 captured and then overwritten by a later rewrite, 1 judge error, and 0 lost at retrieval or surfacing.*
-
-That is development evidence over two arms of one run and it carries no confirmatory weight, but 13 of 14 is not a close call and it points somewhere specific. None of the misses was a fact sitting in the store that recall failed to reach, which is the failure a retrieval-shaped design would predict. A store that surfaces perfectly cannot surface what was never written down, so on this evidence the open problem is write-side fidelity rather than recall coverage: the hard moment is when an agent has just learned something, is mid-task, and has a live prompt in front of it asking for something else. The constraint guard is a first answer to the rewrite half of that, and an incomplete one.
-
-### What the run does not establish
-
-- The five chains are development-exposed. The product changed in response to failures on these same chains, and the confirmatory run reuses them, so the freeze confirms disciplined execution rather than generalization to unseen tasks.
-- The result is package-level. It attributes nothing to the journal, the spine, or surfacing separately. A later development probe tried to: a sham arm carrying this package's exact tool schema and orientation line with an inert implementation, so the surface is present and no memory work happens behind it. On one chain at 15 repetitions, first-pass correctness ran bare 12/15, canon 8/15, sham 7/15. canon and sham are indistinguishable (Fisher exact, p=1.0000) and neither separates from bare at that size (p=0.25 and p=0.13). Fifteen repetitions cannot establish equivalence, so read it as the absence of a signal rather than the presence of a null. What it does say is that any account of this package's costs has to start with the tool surface, because nothing behind the surface has yet been shown to contribute to them.
-- No evaluated arm is a search-driven LLM wiki, so nothing here is a comparison against one.
-- The `agents.md` arm is one construct, a self-maintained file under author-designed preload noise, with no clean-file or human-maintained counterpart run beside it.
-- Eligibility is model-relative. A check counts as a trap only where a cold run of the worker failed it, so every number built on it moves when the worker does.
-- One author wrote the package, the chains, the traps, and the graders.
-- Five repetitions of one trap design are five looks at one design, so no uncertainty interval is attached to any pooled count.
+Papers: "Mutable Canonical Memory over an Immutable Journal, with Recall by
+Surfacing" ([doi:10.5281/zenodo.21890647](https://doi.org/10.5281/zenodo.21890647))
+and "Pricing Recall in Long-Term Memory for AI Agents"
+([doi:10.5281/zenodo.21960351](https://doi.org/10.5281/zenodo.21960351)).
 
 ## More
 

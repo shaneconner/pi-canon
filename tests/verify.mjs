@@ -2393,4 +2393,91 @@ const spill = await canon({ action: "search", query: "steadyterm", journal: true
 assert.equal(spill.split("\n").filter((l) => l.startsWith("svc/steady")).length, 7);
 pass("journal search is opt-in; opted in it splits the window five and five, and a short side cedes its slots");
 
+/* --- /canon-settings ------------------------------------------------------------
+
+   The editor is driven through its real input path because the first pi-fold
+   editor of this shape froze in live use: raw CSI arrow bytes miss on terminals
+   in application cursor mode, where arrows arrive as SS3. Every key here routes
+   through matchesKey, and the gate proves both encodings move what they should. */
+
+{
+  const settings = await jiti.import(join(projectRoot, "extensions/settings.ts"));
+  const settingsPath = join(work, "canon-settings.json");
+
+  // A missing settings file means package defaults, not an error.
+  assert.deepEqual(settings.loadCanonSettingsFile(settingsPath), {});
+
+  // Round-trip: saved state loads identically, and unknown fields are refused by
+  // name; root and mounts are per-project topology and never reach this file.
+  settings.saveCanonSettingsFile(settingsPath, { surface: false, retrieval: "lexical", standout: 1.6 });
+  assert.deepEqual(settings.loadCanonSettingsFile(settingsPath), { surface: false, retrieval: "lexical", standout: 1.6 });
+  const alien = join(work, "canon-settings-alien.json");
+  writeFileSync(alien, JSON.stringify({ root: "/somewhere" }));
+  assert.throws(() => settings.loadCanonSettingsFile(alien), /no root field/);
+
+  // One validation path: every refused edit names why and changes nothing.
+  assert.equal(settings.applyCanonSettingsEdit({}, "standout", "0.5").ok, false);
+  assert.match(settings.applyCanonSettingsEdit({}, "standout", "0.5").error, /at least 1/);
+  assert.equal(settings.applyCanonSettingsEdit({}, "retrieval", "bm25").ok, false);
+  assert.equal(settings.applyCanonSettingsEdit({}, "surface", "maybe").ok, false);
+
+  // The command exists under the family name.
+  const registered = [];
+  settings.registerCanonSettings({ registerCommand: (name, definition) => registered.push({ name, definition }) });
+  assert.deepEqual(registered.map((entry) => entry.name), ["canon-settings"]);
+
+  // The editor itself, through its real input path.
+  let closed = null;
+  const themeLike = { fg: (_role, text) => text, bold: (text) => text };
+  const editor = new settings.CanonSettingsEditor({}, settingsPath, themeLike, (saved) => { closed = saved; });
+  const renders = () => editor.render(120).join("\n");
+  // Both arrow encodings move the selection.
+  editor.handleInput("\x1bOB");
+  assert(renders().includes("→ Resurface after folding"), "SS3 down did not move the selection");
+  editor.handleInput("\x1b[A");
+  assert(renders().includes("→ Surfacing on touch"), "CSI up did not move the selection back");
+  // Cycling rows apply and persist immediately.
+  editor.handleInput("\r");
+  assert.equal(JSON.parse(readFileSync(settingsPath, "utf8")).surface, false,
+    "cycling surfacing to off did not reach disk");
+  // Two SS3 downs reach retrieval; cycling it to lexical makes the cutoff live.
+  editor.handleInput("\x1bOB");
+  editor.handleInput("\x1bOB");
+  editor.handleInput("\r");
+  assert.equal(JSON.parse(readFileSync(settingsPath, "utf8")).retrieval, "lexical",
+    "cycling retrieval did not reach disk");
+  // The standout row steps along its lattice with SS3 right (1.4 -> 1.6), clamped
+  // at the ends rather than wrapping.
+  editor.handleInput("\x1bOB");
+  editor.handleInput("\x1bOC");
+  assert.equal(JSON.parse(readFileSync(settingsPath, "utf8")).standout, 1.6,
+    "SS3 right did not step the standout cutoff");
+  for (let i = 0; i < 10; i++) editor.handleInput("\x1bOC");
+  assert.equal(JSON.parse(readFileSync(settingsPath, "utf8")).standout, 3,
+    "stepping past the top of the lattice was not clamped at 3");
+  // Enter opens the exact editor; an off-lattice value lands verbatim; an invalid
+  // one renders the named error and writes nothing.
+  editor.handleInput("\r");
+  assert(renders().includes("Enter to apply"), "the exact-value editor did not open");
+  for (let i = 0; i < 6; i++) editor.handleInput("\x7f");
+  for (const character of "2.2") editor.handleInput(character);
+  editor.handleInput("\r");
+  assert.equal(JSON.parse(readFileSync(settingsPath, "utf8")).standout, 2.2,
+    "an exact off-lattice value did not reach disk");
+  editor.handleInput("\r");
+  for (let i = 0; i < 6; i++) editor.handleInput("\x7f");
+  for (const character of "0.5") editor.handleInput(character);
+  editor.handleInput("\r");
+  assert(renders().includes("at least 1"), "an invalid exact value rendered no error");
+  assert.equal(JSON.parse(readFileSync(settingsPath, "utf8")).standout, 2.2,
+    "a refused submenu edit reached disk");
+  // Escape inside an open submenu cancels THE SUBMENU, not the screen.
+  editor.handleInput("\x1b");
+  assert(closed === null, "escape inside a submenu closed the whole editor");
+  editor.handleInput("\x1b");
+  assert.equal(closed, true, "escape on the main list did not close the editor");
+
+  pass("/canon-settings round-trips through one validation path and its editor steps, cycles and refuses by name");
+}
+
 console.log(`\nall ${gates} gates green`);
