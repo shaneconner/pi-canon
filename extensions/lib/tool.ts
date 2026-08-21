@@ -365,6 +365,24 @@ export function runCanon(runtime: CanonRuntime, params: Record<string, unknown>)
         ].join("\n");
       }
       const article = store.write(path, fields);
+      /* When a rewrite grows the body, the result says so and restates the split.
+         Measured (W4, two arms over identical eight-session lineages): writers
+         narrate history into articles until the store outgrows the raw transcripts
+         it distills, prompt-side guidance does not change the habit, and this one
+         line at the write boundary cut standing superseded values from 88 to 51 of
+         96 and final store bytes by a fifth, with no reader regression. Any growth
+         fires; that exact behavior is what was measured. Creation is not growth,
+         and a capsule-only write never grows the stored body. */
+      const priorBytes = prior ? Buffer.byteLength(prior.body.trimEnd()) : null;
+      const nextBytes = Buffer.byteLength(composed.body.trimEnd());
+      const growth =
+        priorBytes !== null && nextBytes > priorBytes
+          ? [
+              `Body grew ${priorBytes} -> ${nextBytes} bytes. An article carries current ` +
+                `state; if this growth is narrated history (old values, transitions), move ` +
+                `it to the journal and keep the article at what is true now.`,
+            ]
+          : [];
       /* What this write put in the window, which is what the agent supplied, not the
          merged article: a capsule-only write does not deliver the stored body. */
       surfacer.markUpdated(
@@ -374,6 +392,7 @@ export function runCanon(runtime: CanonRuntime, params: Record<string, unknown>)
       const missingAsset = orphaned(mount.dir, article);
       return [
         `Wrote ${qualify(article.path)}.`,
+        ...growth,
         ...verdict.warnings.map((line) => `schema: ${line}`),
         ...problems,
         ...advise(article, store, prior?.body, { dir: mount.dir, retrieval: runtime.retrieval }, schema),

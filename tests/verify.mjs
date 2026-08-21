@@ -2315,6 +2315,32 @@ assert.match(changedCapsule, /Wrote src\/steady\./);
 assert.notEqual(readFileSync(steadyFile, "utf8"), steadyBytes);
 pass("an identical write reports already current and leaves the file untouched; a real change still lands");
 
+/* The growth line: when a rewrite grows the body, the write's own result names
+   the growth in bytes and restates the article/journal split. Measured (W4, two
+   arms over identical eight-session lineages): prompt-side guidance does not
+   change the narration habit, but this one line at the write boundary cut
+   standing superseded values from 88 to 51 of 96 and final store bytes by a
+   fifth, with no reader regression. Creation is not growth, shrinking is not
+   growth, a capsule-only write never grows the stored body, and the no-op path
+   returns before it. */
+const seeded = await canon({ action: "write", path: "src/ledger", capsule: "Ledger.", body: "# Ledger\nShort." });
+assert.match(seeded, /Wrote src\/ledger\./);
+assert.doesNotMatch(seeded, /Body grew/);
+const grownWrite = await canon({ action: "write", path: "src/ledger", body: "# Ledger\nShort.\nA second line that makes the body longer." });
+assert.match(grownWrite, /Wrote src\/ledger\./);
+assert.match(grownWrite, /Body grew \d+ -> \d+ bytes\./);
+assert.match(grownWrite, /move it to the journal/);
+const shrunkWrite = await canon({ action: "write", path: "src/ledger", body: "# Ledger\nTiny." });
+assert.match(shrunkWrite, /Wrote src\/ledger\./);
+assert.doesNotMatch(shrunkWrite, /Body grew/);
+const ledgerCapsuleOnly = await canon({ action: "write", path: "src/ledger", capsule: "Ledger, retold." });
+assert.match(ledgerCapsuleOnly, /Wrote src\/ledger\./);
+assert.doesNotMatch(ledgerCapsuleOnly, /Body grew/);
+const restatedLedger = await canon({ action: "write", path: "src/ledger", body: "# Ledger\nTiny." });
+assert.match(restatedLedger, /already current/);
+assert.doesNotMatch(restatedLedger, /Body grew/);
+pass("a growing rewrite names its growth; creation, shrinking, capsule-only, and no-op stay silent");
+
 /* The orphan question: an article whose asset went missing warns on read and write,
    but only when its neighborhood is real. A nested address whose parent directory
    exists on disk while nothing matches the asset (file, stem, or directory) is the
