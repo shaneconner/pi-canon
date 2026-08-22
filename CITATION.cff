@@ -1,0 +1,61 @@
+cff-version: 1.2.0
+title: pi-canon
+message: >-
+  If you use this software or its measurements, please cite the paper that
+  covers the part you used. The three are listed under references below.
+type: software
+authors:
+  - family-names: Conner
+    given-names: Shane
+repository-code: https://github.com/shaneconner/pi-canon
+url: https://shaneconner.com/projects/pi-canon/
+abstract: >-
+  Canonical project memory for coding agents: one mutable article per governed
+  asset at a knowable address, an append-only journal beneath it, and recall
+  that arrives when an asset is touched rather than when the agent thinks to
+  ask. Ships for Pi, Codex, and Claude Code.
+keywords:
+  - agent memory
+  - long-term memory
+  - project memory
+  - append-only journal
+  - canonical addressing
+  - context engineering
+  - coding agents
+license: MIT
+version: 0.2.4
+date-released: "2026-08-22"
+references:
+  - type: article
+    title: >-
+      Mutable Canonical Memory over an Immutable Journal, with Recall by
+      Surfacing
+    authors:
+      - family-names: Conner
+        given-names: Shane
+    doi: 10.5281/zenodo.21890647
+    year: 2026
+    notes: >-
+      The first campaign. Whether the design holds up at all, measured against a
+      no-extension floor that received the prior transcripts.
+  - type: article
+    title: Pricing Recall in Long-Term Memory for AI Agents
+    authors:
+      - family-names: Conner
+        given-names: Shane
+    doi: 10.5281/zenodo.21960350
+    year: 2026
+    notes: >-
+      Six studies on what recall costs and which parts earn their keep. Priced
+      the orientation line and the tool schema, both negative and both deleted.
+  - type: article
+    title: "pi-canon: The Write Desk"
+    authors:
+      - family-names: Conner
+        given-names: Shane
+    doi: 10.5281/zenodo.22057257
+    year: 2026
+    notes: >-
+      What gets written down and whether it stays true. Writers left superseded
+      values standing in records whose contract is to state what is true now. A
+      direction that survived three captures and a magnitude that did not.
