@@ -366,17 +366,21 @@ export function runCanon(runtime: CanonRuntime, params: Record<string, unknown>)
       }
       const article = store.write(path, fields);
       /* When a rewrite grows the body, the result says so and restates the split.
-         Measured (W4, two arms over byte-identical eight-session lineages): writers
-         narrate history into articles until the store outgrows the raw transcripts
-         it distills, and prompt-side guidance does not change the habit. The arm
-         that got this line at the write boundary ended with 51 of 96 standing
-         superseded values against the untreated arm's 88, and a median store a
-         fifth smaller, with no reader regression. Arms ran in a fixed order, so
-         that is a difference between two conditions, not an effect identified on
-         the line. It is not one exposure either: it fired after 117 of that arm's
-         198 writes. Any growth fires; that exact behavior is what was measured.
-         Creation is not growth, and a capsule-only write never grows the stored
-         body. */
+         Measured over three captures, two arms each, on byte-identical
+         eight-session lineages: writers narrate history into articles until the
+         store outgrows the raw transcripts it distills, and prompt-side guidance
+         does not change the habit. The arm that got this line ended with fewer
+         standing superseded values in all three, 51 and 45 and 71 of 96 against
+         88 and 87 and 85. Take the DIRECTION and not the size. The third capture
+         counterbalanced the arm order and kept the direction while losing most of
+         the magnitude, and re-running a matched untreated cell moved its median
+         store 39 percent, so this instrument does not measure its own magnitudes
+         reliably. Two readers in 96 sessions were harmed by a stale value, one
+         from each arm, so this line is not known to protect readers. It is also
+         not one exposure: it fired after 117, 99, and 126 of that arm's 198, 184,
+         and 207 writes. Any growth fires; that exact behavior is what was
+         measured. Creation is not growth, and a capsule-only write never grows
+         the stored body. */
       const priorBytes = prior ? Buffer.byteLength(prior.body.trimEnd()) : null;
       const nextBytes = Buffer.byteLength(composed.body.trimEnd());
       const growth =

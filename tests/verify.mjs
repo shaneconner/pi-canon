@@ -2316,14 +2316,14 @@ assert.notEqual(readFileSync(steadyFile, "utf8"), steadyBytes);
 pass("an identical write reports already current and leaves the file untouched; a real change still lands");
 
 /* The growth line: when a rewrite grows the body, the write's own result names
-   the growth in bytes and restates the article/journal split. Measured (W4, two
-   arms over byte-identical eight-session lineages): prompt-side guidance does not
-   change the narration habit, and the arm that got this line at the write
-   boundary ended with 51 of 96 standing superseded values against the untreated
-   arm's 88, with a median store a fifth smaller and no reader regression. Arms
-   ran in a fixed order, so read that as a difference between two conditions.
-   Creation is not growth, shrinking is not growth, a capsule-only write never
-   grows the stored body, and the no-op path returns before it. */
+   the growth in bytes and restates the article/journal split. Measured over three
+   captures on byte-identical eight-session lineages: prompt-side guidance does not
+   change the narration habit, and the arm that got this line ended with fewer
+   standing superseded values every time, 51 and 45 and 71 of 96 against 88 and 87
+   and 85. The direction holds and the size does not; the counterbalanced capture
+   kept the first and lost most of the second. What this gate pins is the behavior,
+   not the effect. Creation is not growth, shrinking is not growth, a capsule-only
+   write never grows the stored body, and the no-op path returns before it. */
 const seeded = await canon({ action: "write", path: "src/ledger", capsule: "Ledger.", body: "# Ledger\nShort." });
 assert.match(seeded, /Wrote src\/ledger\./);
 assert.doesNotMatch(seeded, /Body grew/);
