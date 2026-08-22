@@ -1,6 +1,6 @@
 {
   "name": "pi-canon",
-  "version": "0.2.4",
+  "version": "0.3.0",
   "description": "Canonical project memory with one article per asset, an append-only journal, and capsule surfacing on touch.",
   "author": {
     "name": "Shane Conner",

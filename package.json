@@ -1,6 +1,6 @@
 {
   "name": "pi-canon",
-  "version": "0.2.4",
+  "version": "0.3.0",
   "description": "Canonical project memory for the Pi coding agent: one article per asset at a knowable address, an append-only journal beneath it.",
   "type": "module",
   "exports": {
