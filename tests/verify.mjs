@@ -2317,12 +2317,13 @@ pass("an identical write reports already current and leaves the file untouched; 
 
 /* The growth line: when a rewrite grows the body, the write's own result names
    the growth in bytes and restates the article/journal split. Measured (W4, two
-   arms over identical eight-session lineages): prompt-side guidance does not
-   change the narration habit, but this one line at the write boundary cut
-   standing superseded values from 88 to 51 of 96 and final store bytes by a
-   fifth, with no reader regression. Creation is not growth, shrinking is not
-   growth, a capsule-only write never grows the stored body, and the no-op path
-   returns before it. */
+   arms over byte-identical eight-session lineages): prompt-side guidance does not
+   change the narration habit, and the arm that got this line at the write
+   boundary ended with 51 of 96 standing superseded values against the untreated
+   arm's 88, with a median store a fifth smaller and no reader regression. Arms
+   ran in a fixed order, so read that as a difference between two conditions.
+   Creation is not growth, shrinking is not growth, a capsule-only write never
+   grows the stored body, and the no-op path returns before it. */
 const seeded = await canon({ action: "write", path: "src/ledger", capsule: "Ledger.", body: "# Ledger\nShort." });
 assert.match(seeded, /Wrote src\/ledger\./);
 assert.doesNotMatch(seeded, /Body grew/);

@@ -366,13 +366,17 @@ export function runCanon(runtime: CanonRuntime, params: Record<string, unknown>)
       }
       const article = store.write(path, fields);
       /* When a rewrite grows the body, the result says so and restates the split.
-         Measured (W4, two arms over identical eight-session lineages): writers
+         Measured (W4, two arms over byte-identical eight-session lineages): writers
          narrate history into articles until the store outgrows the raw transcripts
-         it distills, prompt-side guidance does not change the habit, and this one
-         line at the write boundary cut standing superseded values from 88 to 51 of
-         96 and final store bytes by a fifth, with no reader regression. Any growth
-         fires; that exact behavior is what was measured. Creation is not growth,
-         and a capsule-only write never grows the stored body. */
+         it distills, and prompt-side guidance does not change the habit. The arm
+         that got this line at the write boundary ended with 51 of 96 standing
+         superseded values against the untreated arm's 88, and a median store a
+         fifth smaller, with no reader regression. Arms ran in a fixed order, so
+         that is a difference between two conditions, not an effect identified on
+         the line. It is not one exposure either: it fired after 117 of that arm's
+         198 writes. Any growth fires; that exact behavior is what was measured.
+         Creation is not growth, and a capsule-only write never grows the stored
+         body. */
       const priorBytes = prior ? Buffer.byteLength(prior.body.trimEnd()) : null;
       const nextBytes = Buffer.byteLength(composed.body.trimEnd());
       const growth =
